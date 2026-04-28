@@ -67,6 +67,23 @@ export interface GitHubRepoEnriched {
   fork: boolean;
 }
 
+export interface ProfessionJob {
+  title: string;
+  company: string;
+  level: 'Junior' | 'Pleno' | 'Senior';
+  remote: boolean;
+  tags: string[];
+  description: string;
+  salary: string | null;
+  link: string | null;
+  match: number;
+}
+
+export interface ProfessionSearchResult {
+  profileSummary: string;
+  jobs: ProfessionJob[];
+}
+
 export interface CvRequest {
   job: {
     id: string;

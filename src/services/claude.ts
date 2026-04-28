@@ -1,11 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Job, JobSearchRequest } from '../types';
+import { findJobsGemini } from './gemini';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-const SYSTEM_PROMPT =
-  'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois, sem markdown.';
-
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
 
 function buildProfileSummary(profile: JobSearchRequest): string {
@@ -21,53 +18,87 @@ function buildProfileSummary(profile: JobSearchRequest): string {
       : null,
     profile.followers ? `Seguidores GitHub: ${profile.followers}` : null,
   ];
-
   return lines.filter(Boolean).join('\n');
 }
 
-function parseJobs(raw: string): Job[] {
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const parsed: unknown = JSON.parse(clean);
-  return Array.isArray(parsed) ? (parsed as Job[]) : [];
-}
+const RETURN_JOBS_TOOL: Anthropic.Tool = {
+  name: 'return_jobs',
+  description: 'Retorna as vagas encontradas. Sempre chame esta função ao final com todas as vagas pesquisadas.',
+  input_schema: {
+    type: 'object' as const,
+    required: ['jobs'],
+    properties: {
+      jobs: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 6,
+        items: {
+          type: 'object',
+          required: ['title', 'company', 'level', 'remote', 'skills', 'description'],
+          properties: {
+            title:       { type: 'string' },
+            company:     { type: 'string' },
+            level:       { type: 'string', enum: ['Junior', 'Pleno', 'Senior'] },
+            remote:      { type: 'boolean' },
+            skills:      { type: 'array', items: { type: 'string' } },
+            description: { type: 'string' },
+            salary:      { type: ['string', 'null'] },
+            link:        { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+  },
+};
 
-export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
+async function findJobsClaude(profile: JobSearchRequest): Promise<Job[]> {
   const message = await client.messages.create(
     {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: 'Você é um especialista em recrutamento tech. Use web_search para encontrar vagas reais e chame return_jobs com os resultados.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }] as any,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
+      tool_choice: { type: 'any' },
       messages: [
         {
           role: 'user',
-          content: `Analise este perfil e encontre 6 vagas de emprego reais e relevantes. Pesquise vagas atuais em sites como LinkedIn, Glassdoor, ou similar.
+          content: `Pesquise 6 vagas de emprego reais e atuais compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Depois chame return_jobs com os resultados.
 
 PERFIL:
-${buildProfileSummary(profile)}
-
-Retorne APENAS um JSON válido (sem markdown), array com exatamente 6 objetos:
-[{
-  "title": "título da vaga",
-  "company": "empresa",
-  "level": "Junior|Pleno|Senior",
-  "remote": true/false,
-  "skills": ["skill1", "skill2"],
-  "description": "descrição em 2 linhas",
-  "salary": "faixa salarial ou null",
-  "link": "url da vaga ou null"
-}]`,
+${buildProfileSummary(profile)}`,
         },
       ],
     },
     { headers: { 'anthropic-beta': WEB_SEARCH_BETA } }
   );
 
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
+  const toolBlock = message.content.find(
+    (block): block is Anthropic.ToolUseBlock =>
+      block.type === 'tool_use' && block.name === 'return_jobs'
+  );
 
-  return parseJobs(text);
+  if (!toolBlock) {
+    const text = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+    console.error('[jobs] Claude não chamou return_jobs. Resposta:', text.slice(0, 400));
+    throw new Error('Claude não retornou vagas estruturadas');
+  }
+
+  const result = toolBlock.input as { jobs: Job[] };
+  return Array.isArray(result.jobs) ? result.jobs : [];
+}
+
+export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
+  try {
+    return await findJobsClaude(profile);
+  } catch (err) {
+    if (err instanceof Anthropic.RateLimitError) {
+      console.warn('[jobs] Claude rate limit, switching to Gemini...');
+      return findJobsGemini(profile);
+    }
+    throw err;
+  }
 }
