@@ -11,6 +11,7 @@ yarn-error.log*
 # Ambiente
 .env
 .env.*
+!.env.example
 
 # Build
 dist/
