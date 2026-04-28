@@ -2,12 +2,12 @@ import { Router, Request, Response } from 'express';
 import { findProfessionJobs } from '../services/genericJobFinder';
 import { verifyLink } from '../services/linkVerifier';
 import { supabase } from '../services/supabase';
-import { LinkedInData } from '../types';
+import { LinkedInData, UserPreferences } from '../types';
 
 const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
-  const { linkedIn } = req.body as { linkedIn: LinkedInData };
+  const { linkedIn, preferences } = req.body as { linkedIn: LinkedInData; preferences?: UserPreferences };
 
   if (!linkedIn?.positions?.length && !linkedIn?.education?.length) {
     res.status(400).json({ error: 'Perfil LinkedIn necessário' });
@@ -15,7 +15,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education);
+    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, preferences);
 
     const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
 

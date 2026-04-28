@@ -28,6 +28,14 @@ export interface SearchRecord {
   jobs: JobRecord[];
 }
 
+export interface UserPreferences {
+  modality: 'any' | 'remote' | 'presencial' | 'hybrid';
+  location: string;
+  salaryMin: string;
+  salaryMax: string;
+  level: 'any' | 'Junior' | 'Pleno' | 'Senior';
+}
+
 export interface JobSearchRequest {
   username: string;
   name: string;
@@ -35,6 +43,7 @@ export interface JobSearchRequest {
   skills: string[];
   topRepos: string[];
   followers: number;
+  preferences?: UserPreferences;
 }
 
 export interface LinkedInPosition {

@@ -1,9 +1,26 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Job, JobSearchRequest } from '../types';
+import { Job, JobSearchRequest, UserPreferences } from '../types';
 import { findJobsGemini } from './gemini';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
+
+function buildPreferencesSummary(prefs: UserPreferences | undefined): string {
+  if (!prefs) return '';
+  const lines: string[] = [];
+  const modalityLabel: Record<string, string> = {
+    remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '',
+  };
+  if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
+  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
+  if (prefs.salaryMin || prefs.salaryMax) {
+    const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
+    lines.push(`Faixa salarial: ${range}`);
+  }
+  if (prefs.level !== 'any') lines.push(`Nível desejado: ${prefs.level}`);
+  if (!lines.length) return '';
+  return '\n\nPREFERÊNCIAS DO CANDIDATO (priorize vagas que atendam):\n' + lines.join('\n');
+}
 
 function buildProfileSummary(profile: JobSearchRequest): string {
   const lines = [
@@ -18,7 +35,7 @@ function buildProfileSummary(profile: JobSearchRequest): string {
       : null,
     profile.followers ? `Seguidores GitHub: ${profile.followers}` : null,
   ];
-  return lines.filter(Boolean).join('\n');
+  return lines.filter(Boolean).join('\n') + buildPreferencesSummary(profile.preferences);
 }
 
 const RETURN_JOBS_TOOL: Anthropic.Tool = {

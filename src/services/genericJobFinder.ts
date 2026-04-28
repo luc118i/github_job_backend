@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LinkedInPosition, LinkedInEducation, ProfessionSearchResult } from '../types';
+import { LinkedInPosition, LinkedInEducation, ProfessionSearchResult, UserPreferences } from '../types';
 import { findProfessionJobsGemini } from './gemini';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -56,9 +56,24 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
   },
 };
 
+function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
+  if (!prefs) return '';
+  const lines: string[] = [];
+  const modalityLabel: Record<string, string> = { remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '' };
+  if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
+  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
+  if (prefs.salaryMin || prefs.salaryMax) {
+    const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
+    lines.push(`Faixa salarial: ${range}`);
+  }
+  if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
+  return lines.length ? '\nPreferências (priorize): ' + lines.join(' · ') : '';
+}
+
 async function findProfessionJobsClaude(
   positions: LinkedInPosition[],
-  education: LinkedInEducation[]
+  education: LinkedInEducation[],
+  preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
   const message = await client.messages.create(
     {
@@ -74,7 +89,7 @@ async function findProfessionJobsClaude(
           content: `Pesquise 6 vagas reais compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Depois chame return_jobs com os resultados.
 
 Experiência: ${formatPositions(positions)}
-Formação: ${formatEducation(education)}`,
+Formação: ${formatEducation(education)}${buildProfessionPrefsBlock(preferences)}`,
         },
       ],
     },
@@ -104,14 +119,15 @@ Formação: ${formatEducation(education)}`,
 
 export async function findProfessionJobs(
   positions: LinkedInPosition[],
-  education: LinkedInEducation[]
+  education: LinkedInEducation[],
+  preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
   try {
-    return await findProfessionJobsClaude(positions, education);
+    return await findProfessionJobsClaude(positions, education, preferences);
   } catch (err) {
     if (err instanceof Anthropic.RateLimitError) {
       console.warn('[profession] Claude rate limit, switching to Gemini...');
-      return findProfessionJobsGemini(positions, education);
+      return findProfessionJobsGemini(positions, education, preferences);
     }
     throw err;
   }

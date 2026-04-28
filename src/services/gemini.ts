@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, ProfessionSearchResult } from '../types';
+import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, ProfessionSearchResult, UserPreferences } from '../types';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
@@ -11,6 +11,20 @@ function extractJson(text: string): unknown {
   const match = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!match) throw new Error('Gemini não retornou JSON válido');
   return JSON.parse(match[0]);
+}
+
+function buildPrefsBlock(prefs: UserPreferences | undefined): string {
+  if (!prefs) return '';
+  const lines: string[] = [];
+  const modalityLabel: Record<string, string> = { remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '' };
+  if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
+  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
+  if (prefs.salaryMin || prefs.salaryMax) {
+    const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
+    lines.push(`Faixa salarial: ${range}`);
+  }
+  if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
+  return lines.length ? '\n\nPREFERÊNCIAS (priorize):\n' + lines.join('\n') : '';
 }
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
@@ -30,7 +44,7 @@ GitHub: ${profile.username}
 Nome: ${profile.name}
 ${profile.bio ? `Bio: ${profile.bio}` : ''}
 Linguagens: ${profile.skills.slice(0, 6).join(', ')}
-Repositórios: ${profile.topRepos.join(', ')}
+Repositórios: ${profile.topRepos.join(', ')}${buildPrefsBlock(profile.preferences)}
 
 Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
 [{
@@ -57,7 +71,8 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
 
 export async function findProfessionJobsGemini(
   positions: LinkedInPosition[],
-  education: LinkedInEducation[]
+  education: LinkedInEducation[],
+  preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
@@ -79,7 +94,7 @@ export async function findProfessionJobsGemini(
     `Pesquise 6 vagas reais compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
-Formação: ${formattedEducation}
+Formação: ${formattedEducation}${buildPrefsBlock(preferences)}
 
 Retorne APENAS este JSON (sem nenhum texto fora do JSON):
 {
