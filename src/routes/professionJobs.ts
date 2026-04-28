@@ -25,6 +25,7 @@ router.post('/', async (req: Request, res: Response) => {
         company: job.company ?? '',
         level: (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
         remote: job.remote ?? false,
+        location: (job as { location?: string | null }).location ?? null,
         skills: Array.isArray(job.tags) ? job.tags : [],
         description: job.description ?? '',
         salary: job.salary ?? null,

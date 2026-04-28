@@ -5,6 +5,7 @@ export interface Job {
   company: string;
   level: 'Junior' | 'Pleno' | 'Senior';
   remote: boolean;
+  location: string | null;
   skills: string[];
   description: string;
   salary: string | null;

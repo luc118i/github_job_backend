@@ -38,6 +38,7 @@ router.post('/', async (req: Request, res: Response) => {
         company: job.company,
         level: job.level,
         remote: job.remote,
+        location: job.location ?? null,
         skills: job.skills,
         description: job.description,
         salary: job.salary,

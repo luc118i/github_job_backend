@@ -40,6 +40,7 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
             company:     { type: 'string' },
             level:       { type: 'string', enum: ['Junior', 'Pleno', 'Senior'] },
             remote:      { type: 'boolean' },
+            location:    { type: ['string', 'null'], description: 'Cidade/estado ou "Remoto" ou "Híbrido - Cidade, UF"' },
             skills:      { type: 'array', items: { type: 'string' } },
             description: { type: 'string' },
             salary:      { type: ['string', 'null'] },
