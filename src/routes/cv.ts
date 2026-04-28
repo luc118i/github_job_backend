@@ -7,7 +7,7 @@ const router = Router();
 router.post('/', async (req: Request, res: Response) => {
   const body = req.body as CvRequest;
 
-  if (!body?.job?.id || !body?.candidate?.githubLogin) {
+  if (!body?.job?.id || !body?.candidate?.name) {
     res.status(400).json({ error: 'Dados insuficientes para gerar CV' });
     return;
   }
