@@ -62,16 +62,24 @@ function buildPrompt(req: CvRequest): string {
 
   const bio = candidate.githubBio ? `Bio: ${candidate.githubBio}` : '';
 
+  const contactParts = [
+    candidate.email,
+    candidate.phone,
+    candidate.githubLogin ? `github.com/${candidate.githubLogin}` : null,
+  ].filter(Boolean);
+  const contactLine = contactParts.length ? contactParts.join(' | ') : '[contato]';
+
   return `Gere um currículo ATS-otimizado em Markdown. Retorne APENAS o Markdown, sem explicações.
 
 VAGA: ${job.title} @ ${job.company} | ${job.level} | ${job.remote ? 'Remoto' : 'Presencial'}
 Skills: ${job.skills.join(', ')}
 Descrição: ${shortDesc}
 
-CANDIDATO: ${candidate.name} | ${candidate.email ?? '[email]'} | github.com/${candidate.githubLogin}
+CANDIDATO: ${candidate.name}
+Contato: ${contactLine}
 ${bio}
-Linguagens GitHub: ${candidate.skills.join(', ')}
-Repos: ${topRepos || '(nenhum)'}
+${candidate.skills.length ? `Linguagens GitHub: ${candidate.skills.join(', ')}` : ''}
+${topRepos ? `Repos: ${topRepos}` : ''}
 
 EXPERIÊNCIA PROFISSIONAL (dados reais do LinkedIn):
 ${formatPositions(candidate.positions)}
@@ -81,7 +89,7 @@ ${formatEducation(candidate.education)}
 
 ESTRUTURA OBRIGATÓRIA:
 # ${candidate.name.toUpperCase()}
-[contato]
+${contactLine}
 
 ## RESUMO PROFISSIONAL
 [use keywords exatas: "${job.title}", "${job.skills.slice(0, 3).join('", "')}"]

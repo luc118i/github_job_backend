@@ -15,8 +15,11 @@ export async function parseLinkedInPdf(buffer: Buffer): Promise<LinkedInData> {
     messages: [
       {
         role: 'user',
-        content: `Extraia experiências profissionais e formação acadêmica deste perfil LinkedIn. Retorne APENAS JSON válido, sem markdown:
+        content: `Extraia dados do perfil LinkedIn abaixo. Retorne APENAS JSON válido, sem markdown:
 {
+  "name": "Nome Completo ou null",
+  "email": "email@exemplo.com ou null",
+  "phone": "+55 11 99999-9999 ou null",
   "positions": [
     {"company": "string", "title": "string", "description": "string|null", "location": "string|null", "startedOn": "string", "finishedOn": "string|null"}
   ],
@@ -25,7 +28,7 @@ export async function parseLinkedInPdf(buffer: Buffer): Promise<LinkedInData> {
   ]
 }
 
-finishedOn null = emprego atual. Retorne arrays vazios se não encontrar dados.
+finishedOn null = emprego atual. Retorne null para campos não encontrados. Retorne arrays vazios se não encontrar dados.
 
 TEXTO DO PDF:
 ${text.slice(0, 4000)}`,
@@ -42,6 +45,9 @@ ${text.slice(0, 4000)}`,
   const parsed = JSON.parse(clean) as LinkedInData;
 
   return {
+    name: (parsed.name as string | null | undefined) ?? null,
+    email: (parsed.email as string | null | undefined) ?? null,
+    phone: (parsed.phone as string | null | undefined) ?? null,
     positions: Array.isArray(parsed.positions) ? parsed.positions : [],
     education: Array.isArray(parsed.education) ? parsed.education : [],
   };
