@@ -6,6 +6,8 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GOOGLE_SEARCH_TOOL: any = { googleSearch: {} };
 
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+
 function extractJson(text: string): unknown {
   const clean = text.replace(/```json|```/g, '').trim();
   const match = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
@@ -28,16 +30,7 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
 }
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools: [GOOGLE_SEARCH_TOOL] as any,
-    systemInstruction:
-      'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
-  });
-
-  const result = await model.generateContent(
-    `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -57,16 +50,36 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
   "description": "descrição em 2 linhas",
   "salary": null,
   "link": "url da vaga ou null"
-}]`
-  );
+}]`;
 
-  const text = result.response.text();
-  console.log('[jobs/gemini] resposta:', text.slice(0, 200));
-
-  const parsed = extractJson(text);
-  if (Array.isArray(parsed)) return parsed as Job[];
-  const obj = parsed as Record<string, unknown>;
-  return Array.isArray(obj.jobs) ? (obj.jobs as Job[]) : [];
+  let lastErr: unknown;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: [GOOGLE_SEARCH_TOOL] as any,
+        systemInstruction:
+          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
+      });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      console.log(`[jobs/gemini] ${modelName} resposta:`, text.slice(0, 200));
+      const parsed = extractJson(text);
+      if (Array.isArray(parsed)) return parsed as Job[];
+      const obj = parsed as Record<string, unknown>;
+      return Array.isArray(obj.jobs) ? (obj.jobs as Job[]) : [];
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 503 || status === 429) {
+        console.warn(`[jobs/gemini] ${modelName} indisponível (${status}), tentando próximo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 export async function findProfessionJobsGemini(
@@ -74,14 +87,6 @@ export async function findProfessionJobsGemini(
   education: LinkedInEducation[],
   preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools: [GOOGLE_SEARCH_TOOL] as any,
-    systemInstruction:
-      'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
-  });
-
   const formattedPositions = positions.length
     ? positions.slice(0, 3).map((p) => `${p.title}, ${p.company} (${p.startedOn}–${p.finishedOn ?? 'atual'})`).join('; ')
     : 'Sem experiência';
@@ -90,8 +95,7 @@ export async function findProfessionJobsGemini(
     ? education.slice(0, 2).map((e) => `${e.degree ?? 'Curso'}, ${e.school}`).join('; ')
     : 'Sem formação';
 
-  const result = await model.generateContent(
-    `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
 Formação: ${formattedEducation}${buildPrefsBlock(preferences)}
@@ -111,15 +115,35 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
     "link": null,
     "match": 85
   }]
-}`
-  );
+}`;
 
-  const text = result.response.text();
-  console.log('[profession/gemini] resposta:', text.slice(0, 200));
-
-  const parsed = extractJson(text) as Record<string, unknown>;
-  return {
-    profileSummary: (parsed.profileSummary as string) ?? '',
-    jobs: Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [],
-  };
+  let lastErr: unknown;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: [GOOGLE_SEARCH_TOOL] as any,
+        systemInstruction:
+          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
+      });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      console.log(`[profession/gemini] ${modelName} resposta:`, text.slice(0, 200));
+      const parsed = extractJson(text) as Record<string, unknown>;
+      return {
+        profileSummary: (parsed.profileSummary as string) ?? '',
+        jobs: Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [],
+      };
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 503 || status === 429) {
+        console.warn(`[profession/gemini] ${modelName} indisponível (${status}), tentando próximo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }

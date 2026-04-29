@@ -128,14 +128,29 @@ async function generateCvClaude(req: CvRequest): Promise<string> {
   return stripEmojis(raw);
 }
 
-async function generateCvGemini(req: CvRequest): Promise<string> {
-  const model = geminiClient.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    systemInstruction: SYSTEM_PROMPT,
-  });
+const GEMINI_CV_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
-  const result = await model.generateContent(buildPrompt(req));
-  return stripEmojis(result.response.text());
+async function generateCvGemini(req: CvRequest): Promise<string> {
+  let lastErr: unknown;
+  for (const modelName of GEMINI_CV_MODELS) {
+    try {
+      const model = geminiClient.getGenerativeModel({
+        model: modelName,
+        systemInstruction: SYSTEM_PROMPT,
+      });
+      const result = await model.generateContent(buildPrompt(req));
+      return stripEmojis(result.response.text());
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 503 || status === 429) {
+        console.warn(`[cv] Gemini ${modelName} indisponível (${status}), tentando próximo modelo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 export async function generateCv(req: CvRequest): Promise<CvResponse> {
