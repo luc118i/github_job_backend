@@ -51,7 +51,7 @@ router.post('/register', async (req: Request, res: Response) => {
       password_hash: passwordHash,
       linkedin_data: linkedInData,
     })
-    .select('id, email, name')
+    .select('id, email, name, github_username')
     .single();
 
   if (error) {
@@ -60,7 +60,7 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  res.json({ token: signToken(user.id), user: { id: user.id, email: user.email, name: user.name } });
+  res.json({ token: signToken(user.id), user: { id: user.id, email: user.email, name: user.name, github_username: user.github_username ?? null } });
 });
 
 // POST /auth/login
@@ -74,7 +74,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   const { data: user } = await supabase
     .from('users')
-    .select('id, email, name, password_hash, linkedin_data')
+    .select('id, email, name, github_username, password_hash, linkedin_data')
     .eq('email', email.toLowerCase())
     .maybeSingle();
 
@@ -91,7 +91,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   res.json({
     token: signToken(user.id),
-    user: { id: user.id, email: user.email, name: user.name },
+    user: { id: user.id, email: user.email, name: user.name, github_username: user.github_username ?? null },
     linkedInData: user.linkedin_data,
   });
 });
@@ -100,7 +100,7 @@ router.post('/login', async (req: Request, res: Response) => {
 router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   const { data: user } = await supabase
     .from('users')
-    .select('id, email, name, linkedin_data')
+    .select('id, email, name, github_username, linkedin_data')
     .eq('id', req.userId!)
     .maybeSingle();
 
@@ -109,7 +109,38 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  res.json({ user: { id: user.id, email: user.email, name: user.name }, linkedInData: user.linkedin_data });
+  res.json({
+    user: { id: user.id, email: user.email, name: user.name, github_username: user.github_username ?? null },
+    linkedInData: user.linkedin_data,
+  });
+});
+
+// PATCH /auth/profile — atualiza nome e github_username
+router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { name, github_username } = req.body as { name?: string | null; github_username?: string | null };
+
+  const updateData: Record<string, unknown> = {};
+  if (name !== undefined) updateData.name = name || null;
+  if (github_username !== undefined) updateData.github_username = github_username || null;
+
+  if (Object.keys(updateData).length === 0) {
+    res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    return;
+  }
+
+  const { data: user, error } = await supabase
+    .from('users')
+    .update(updateData)
+    .eq('id', req.userId!)
+    .select('id, email, name, github_username')
+    .single();
+
+  if (error || !user) {
+    res.status(500).json({ error: 'Erro ao atualizar perfil' });
+    return;
+  }
+
+  res.json({ user: { id: user.id, email: user.email, name: user.name, github_username: user.github_username ?? null } });
 });
 
 // PATCH /auth/linkedin — atualiza linkedin_data do usuário logado
