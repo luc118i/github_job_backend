@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { generateCv } from '../services/cvGenerator';
 import { CvRequest } from '../types';
+import { supabase } from '../services/supabase';
 
 const router = Router();
 
@@ -28,6 +29,39 @@ router.post('/', async (req: Request, res: Response) => {
       res.status(500).json({ error: 'Erro ao gerar currículo. Tente novamente.' });
     }
   }
+});
+
+router.get('/job/:jobId', async (req: Request, res: Response) => {
+  const { data, error } = await supabase
+    .from('cvs')
+    .select('id, content')
+    .eq('job_id', req.params.jobId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    res.status(404).json({ error: 'CV não encontrado' });
+    return;
+  }
+  res.json(data);
+});
+
+router.patch('/:id', async (req: Request, res: Response) => {
+  const { content } = req.body as { content?: string };
+  if (!content) {
+    res.status(400).json({ error: 'content obrigatório' });
+    return;
+  }
+  const { error } = await supabase
+    .from('cvs')
+    .update({ content })
+    .eq('id', req.params.id);
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;
