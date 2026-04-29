@@ -3,10 +3,11 @@ import { findJobs } from '../services/claude';
 import { supabase } from '../services/supabase';
 import { verifyLink } from '../services/linkVerifier';
 import { JobSearchRequest } from '../types';
+import { optionalAuth, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   const profile = req.body as JobSearchRequest;
 
   if (!profile.username) {
@@ -20,6 +21,7 @@ router.post('/', async (req: Request, res: Response) => {
       .insert({
         github_username: profile.username,
         skills: profile.skills,
+        user_id: req.userId ?? null,
       })
       .select()
       .single();
