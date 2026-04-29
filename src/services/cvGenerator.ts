@@ -1,6 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CvRequest, CvResponse, LinkedInPosition, LinkedInEducation } from '../types';
 import { supabase } from './supabase';
+
+const geminiClient = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -109,10 +112,10 @@ ${contactLine}
 Regras: nunca invente dados; bullet points com verbos de ação; sem tabelas.`;
 }
 
-export async function generateCv(req: CvRequest): Promise<CvResponse> {
+async function generateCvClaude(req: CvRequest): Promise<string> {
   const message = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: buildPrompt(req) }],
   });
@@ -122,7 +125,32 @@ export async function generateCv(req: CvRequest): Promise<CvResponse> {
     .map((b) => b.text)
     .join('\n');
 
-  const content = stripEmojis(raw);
+  return stripEmojis(raw);
+}
+
+async function generateCvGemini(req: CvRequest): Promise<string> {
+  const model = geminiClient.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: SYSTEM_PROMPT,
+  });
+
+  const result = await model.generateContent(buildPrompt(req));
+  return stripEmojis(result.response.text());
+}
+
+export async function generateCv(req: CvRequest): Promise<CvResponse> {
+  let content: string;
+
+  try {
+    content = await generateCvClaude(req);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      console.warn(`[cv] Claude API error (${err.status}), switching to Gemini...`);
+      content = await generateCvGemini(req);
+    } else {
+      throw err;
+    }
+  }
 
   const { data, error } = await supabase
     .from('cvs')

@@ -81,7 +81,7 @@ async function findJobsClaude(profile: JobSearchRequest): Promise<Job[]> {
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas de emprego reais e atuais compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Depois chame return_jobs com os resultados.
+          content: `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias de publicação. Depois chame return_jobs com os resultados.
 
 PERFIL:
 ${buildProfileSummary(profile)}`,
@@ -113,8 +113,8 @@ export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
   try {
     return await findJobsClaude(profile);
   } catch (err) {
-    if (err instanceof Anthropic.RateLimitError) {
-      console.warn('[jobs] Claude rate limit, switching to Gemini...');
+    if (err instanceof Anthropic.APIError) {
+      console.warn(`[jobs] Claude API error (${err.status}), switching to Gemini...`);
       return findJobsGemini(profile);
     }
     throw err;

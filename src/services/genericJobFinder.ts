@@ -86,7 +86,7 @@ async function findProfessionJobsClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas reais compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Depois chame return_jobs com os resultados.
+          content: `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias de publicação. Depois chame return_jobs com os resultados.
 
 Experiência: ${formatPositions(positions)}
 Formação: ${formatEducation(education)}${buildProfessionPrefsBlock(preferences)}`,
@@ -125,8 +125,8 @@ export async function findProfessionJobs(
   try {
     return await findProfessionJobsClaude(positions, education, preferences);
   } catch (err) {
-    if (err instanceof Anthropic.RateLimitError) {
-      console.warn('[profession] Claude rate limit, switching to Gemini...');
+    if (err instanceof Anthropic.APIError) {
+      console.warn(`[profession] Claude API error (${err.status}), switching to Gemini...`);
       return findProfessionJobsGemini(positions, education, preferences);
     }
     throw err;

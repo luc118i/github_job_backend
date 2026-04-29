@@ -29,7 +29,7 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: [GOOGLE_SEARCH_TOOL] as any,
     systemInstruction:
@@ -37,7 +37,7 @@ export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> 
   });
 
   const result = await model.generateContent(
-    `Pesquise 6 vagas de emprego reais e atuais compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Depois retorne APENAS o JSON.
+    `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -75,7 +75,7 @@ export async function findProfessionJobsGemini(
   preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: [GOOGLE_SEARCH_TOOL] as any,
     systemInstruction:
@@ -91,7 +91,7 @@ export async function findProfessionJobsGemini(
     : 'Sem formação';
 
   const result = await model.generateContent(
-    `Pesquise 6 vagas reais compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Depois retorne APENAS o JSON.
+    `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
 Formação: ${formattedEducation}${buildPrefsBlock(preferences)}

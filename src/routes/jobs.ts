@@ -60,7 +60,14 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     res.json({ jobs: savedJobs ?? [], searchId: search.id });
   } catch (err) {
     console.error('Error finding jobs:', err);
-    res.status(500).json({ error: 'Erro ao buscar vagas' });
+    const msg = err instanceof Error ? err.message.toLowerCase() : '';
+    if (msg.includes('quota') || msg.includes('too many requests')) {
+      res.status(503).json({ error: 'Limite de requisições atingido nos dois serviços de IA. Tente novamente em alguns minutos.' });
+    } else if (msg.includes('credit') || msg.includes('balance') || msg.includes('billing')) {
+      res.status(503).json({ error: 'Serviço de IA temporariamente indisponível. Tente novamente mais tarde.' });
+    } else {
+      res.status(500).json({ error: 'Erro ao buscar vagas. Tente novamente.' });
+    }
   }
 });
 
