@@ -5,6 +5,18 @@ import { supabase } from '../services/supabase';
 
 const router = Router();
 
+function getRetryAfterSeconds(err: unknown): number | null {
+  const details = (err as { errorDetails?: Array<Record<string, unknown>> }).errorDetails;
+  if (!Array.isArray(details)) return null;
+  for (const d of details) {
+    if (typeof d.retryDelay === 'string') {
+      const match = d.retryDelay.match(/^(\d+)/);
+      if (match) return parseInt(match[1]);
+    }
+  }
+  return null;
+}
+
 router.post('/', async (req: Request, res: Response) => {
   const body = req.body as CvRequest;
 
@@ -20,7 +32,8 @@ router.post('/', async (req: Request, res: Response) => {
     console.error('Error generating CV:', err);
     const msg = err instanceof Error ? err.message.toLowerCase() : '';
     if (msg.includes('quota') || msg.includes('too many requests') || msg.includes('429')) {
-      res.status(503).json({ error: 'Limite de requisições atingido. Tente novamente em alguns minutos.' });
+      const retryAfter = getRetryAfterSeconds(err);
+      res.status(503).json({ error: 'Limite de requisições atingido. Tente novamente em alguns instantes.', retryAfter });
     } else if (msg.includes('credit') || msg.includes('balance') || msg.includes('billing')) {
       res.status(503).json({ error: 'Serviço de IA temporariamente indisponível. Tente novamente mais tarde.' });
     } else if (msg.includes('503') || msg.includes('service unavailable') || msg.includes('high demand')) {
