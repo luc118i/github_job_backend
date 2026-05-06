@@ -29,9 +29,9 @@ router.post('/', async (req: Request, res: Response) => {
         skills: Array.isArray(job.tags) ? job.tags : [],
         description: job.description ?? '',
         salary: job.salary ?? null,
-        link: job.link ?? null,
+        link: job.link || null,
         match: typeof job.match === 'number' ? job.match : 0,
-        link_status: await verifyLink(job.link ?? null),
+        link_status: await verifyLink(job.link || null),
       }))
     );
 

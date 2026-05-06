@@ -47,7 +47,7 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
             tags:        { type: 'array', items: { type: 'string' } },
             description: { type: 'string' },
             salary:      { type: ['string', 'null'] },
-            link:        { type: ['string', 'null'] },
+            link:        { type: 'string', description: 'URL exata da página de candidatura encontrada via web_search. Obrigatório — copie o link diretamente do resultado da pesquisa.' },
             match:       { type: 'number', minimum: 0, maximum: 100 },
           },
         },
@@ -80,7 +80,7 @@ async function findProfessionJobsClaude(
     {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento para todas as áreas profissionais. Use web_search para encontrar vagas reais e chame return_jobs com os resultados.',
+      system: 'Você é um especialista em recrutamento para todas as áreas profissionais. Use web_search para encontrar vagas reais com suas URLs de candidatura. Ao chamar return_jobs, copie a URL exata de cada vaga encontrada no campo link — nunca deixe link como null.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },

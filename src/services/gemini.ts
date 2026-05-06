@@ -62,7 +62,7 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
+          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
@@ -128,7 +128,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois.',
+          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();

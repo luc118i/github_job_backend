@@ -44,8 +44,8 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         skills: job.skills,
         description: job.description,
         salary: job.salary,
-        link: job.link,
-        link_status: await verifyLink(job.link),
+        link: job.link || null,
+        link_status: await verifyLink(job.link || null),
         seen: false,
       }))
     );
