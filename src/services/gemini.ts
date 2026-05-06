@@ -30,7 +30,7 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
 }
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
-  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -49,7 +49,7 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
   "skills": ["skill1", "skill2"],
   "description": "descrição em 2 linhas",
   "salary": null,
-  "link": "url da vaga ou null"
+  "link": "https://url-real-da-vaga.com"
 }]`;
 
   let lastErr: unknown;
@@ -95,7 +95,7 @@ export async function findProfessionJobsGemini(
     ? education.slice(0, 2).map((e) => `${e.degree ?? 'Curso'}, ${e.school}`).join('; ')
     : 'Sem formação';
 
-  const prompt = `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
 Formação: ${formattedEducation}${buildPrefsBlock(preferences)}
@@ -112,7 +112,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
     "tags": ["área de atuação"],
     "description": "descrição concisa em 1-2 linhas",
     "salary": null,
-    "link": null,
+    "link": "https://url-real-da-vaga.com",
     "match": 85
   }]
 }`;
