@@ -26,11 +26,13 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
     lines.push(`Faixa salarial: ${range}`);
   }
   if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
+  if (prefs.maxAgeDays) lines.push(`Período máximo: ${prefs.maxAgeDays} dias`);
   return lines.length ? '\n\nPREFERÊNCIAS (priorize):\n' + lines.join('\n') : '';
 }
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
-  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const maxAge = profile.preferences?.maxAgeDays ?? 90;
+  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de ${maxAge} dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -95,7 +97,8 @@ export async function findProfessionJobsGemini(
     ? education.slice(0, 2).map((e) => `${e.degree ?? 'Curso'}, ${e.school}`).join('; ')
     : 'Sem formação';
 
-  const prompt = `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const maxAge = preferences?.maxAgeDays ?? 90;
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de ${maxAge} dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
 Formação: ${formattedEducation}${buildPrefsBlock(preferences)}

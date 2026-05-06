@@ -34,6 +34,7 @@ export interface UserPreferences {
   salaryMin: string;
   salaryMax: string;
   level: 'any' | 'Junior' | 'Pleno' | 'Senior';
+  maxAgeDays?: number;
 }
 
 export interface JobSearchRequest {

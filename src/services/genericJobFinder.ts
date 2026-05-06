@@ -67,6 +67,7 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
     lines.push(`Faixa salarial: ${range}`);
   }
   if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
+  if (prefs.maxAgeDays) lines.push(`Período máximo: ${prefs.maxAgeDays} dias`);
   return lines.length ? '\nPreferências (priorize): ' + lines.join(' · ') : '';
 }
 
@@ -86,7 +87,7 @@ async function findProfessionJobsClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de 30 dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
+          content: `Pesquise 6 vagas reais publicadas nos últimos ${preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de ${preferences?.maxAgeDays ?? 90} dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
 
 Experiência: ${formatPositions(positions)}
 Formação: ${formatEducation(education)}${buildProfessionPrefsBlock(preferences)}`,

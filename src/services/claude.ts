@@ -81,7 +81,7 @@ async function findJobsClaude(profile: JobSearchRequest): Promise<Job[]> {
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas de emprego reais publicadas nos últimos 30 dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de 30 dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
+          content: `Pesquise 6 vagas de emprego reais publicadas nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de ${profile.preferences?.maxAgeDays ?? 90} dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
 
 PERFIL:
 ${buildProfileSummary(profile)}`,
