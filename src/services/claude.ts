@@ -203,13 +203,13 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
     {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento. Analise o perfil do candidato de forma holística e use web_search para encontrar vagas reais. Ao chamar return_jobs, copie a URL exata de cada vaga no campo link.',
+      system: 'Você é um especialista em recrutamento. Analise o perfil do candidato de forma holística e use web_search para encontrar vagas reais. Ao chamar return_jobs, copie a URL exata de cada vaga no campo link. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
       messages: [{
         role: 'user',
-        content: `Pesquise 6 vagas reais nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo. Chame return_jobs com os resultados.\n\nPERFIL:\n${buildProfileSummary(profile)}`,
+        content: `Pesquise 6 vagas reais nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. NÃO use links do LinkedIn. Chame return_jobs com os resultados.\n\nPERFIL:\n${buildProfileSummary(profile)}`,
       }],
     },
     { headers: { 'anthropic-beta': WEB_SEARCH_BETA } }

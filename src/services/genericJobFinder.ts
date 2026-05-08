@@ -80,14 +80,14 @@ async function findProfessionJobsClaude(
     {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento para todas as áreas profissionais. Use web_search para encontrar vagas reais com suas URLs de candidatura. Ao chamar return_jobs, copie a URL exata de cada vaga encontrada no campo link — nunca deixe link como null.',
+      system: 'Você é um especialista em recrutamento para todas as áreas profissionais. Use web_search para encontrar vagas reais com suas URLs de candidatura. Ao chamar return_jobs, copie a URL exata de cada vaga no campo link. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas reais publicadas nos últimos ${preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de ${preferences?.maxAgeDays ?? 90} dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
+          content: `Pesquise 6 vagas reais publicadas nos últimos ${preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${preferences?.maxAgeDays ?? 90} dias de publicação. NÃO use links do LinkedIn. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
 
 Experiência: ${formatPositions(positions)}
 Formação: ${formatEducation(education)}${buildProfessionPrefsBlock(preferences)}`,

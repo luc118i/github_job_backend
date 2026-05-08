@@ -32,7 +32,7 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
   const maxAge = profile.preferences?.maxAgeDays ?? 90;
-  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de ${maxAge} dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -62,7 +62,7 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null.',
+          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
@@ -98,7 +98,7 @@ export async function findProfessionJobsGemini(
     : 'Sem formação';
 
   const maxAge = preferences?.maxAgeDays ?? 90;
-  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no LinkedIn, Catho ou InfoJobs. Ignore vagas com mais de ${maxAge} dias. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
 Formação: ${formattedEducation}${buildPrefsBlock(preferences)}
@@ -128,7 +128,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null.',
+          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
