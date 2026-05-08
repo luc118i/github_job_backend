@@ -52,6 +52,8 @@ export interface JobSearchRequest {
   repoContext?: RepoContext[];
   followers: number;
   preferences?: UserPreferences;
+  blockedKeywords?: string[];
+  likedKeywords?: string[];
 }
 
 export interface LinkedInPosition {

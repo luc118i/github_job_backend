@@ -22,6 +22,8 @@ const TRUSTED_DOMAINS = new Set([
   'empregos.com.br',
   'nerdin.com.br',
   'hipsters.jobs',
+  'adzuna.com',
+  'adzuna.com.br',
 ]);
 
 function isSuspicious(hostname: string): boolean {
