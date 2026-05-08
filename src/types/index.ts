@@ -37,12 +37,19 @@ export interface UserPreferences {
   maxAgeDays?: number;
 }
 
+export interface RepoContext {
+  name: string;
+  description: string | null;
+  topics: string[];
+}
+
 export interface JobSearchRequest {
   username: string;
   name: string;
   bio: string | null;
   skills: string[];
   topRepos: string[];
+  repoContext?: RepoContext[];
   followers: number;
   preferences?: UserPreferences;
 }

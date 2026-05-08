@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Job, JobSearchRequest, UserPreferences } from '../types';
+import { Job, JobSearchRequest, RepoContext, UserPreferences } from '../types';
 import { findJobsGemini } from './gemini';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -22,19 +22,35 @@ function buildPreferencesSummary(prefs: UserPreferences | undefined): string {
   return '\n\nPREFERÊNCIAS DO CANDIDATO (priorize vagas que atendam):\n' + lines.join('\n');
 }
 
+function formatRepoContext(repos: RepoContext[]): string {
+  return repos
+    .map((r) => {
+      const parts = [r.name];
+      if (r.description) parts.push(`(${r.description})`);
+      if (r.topics.length) parts.push(`[${r.topics.join(', ')}]`);
+      return '- ' + parts.join(' ');
+    })
+    .join('\n');
+}
+
 function buildProfileSummary(profile: JobSearchRequest): string {
-  const lines = [
+  const lines: (string | null)[] = [
     profile.username ? `GitHub: ${profile.username}` : null,
     `Nome: ${profile.name}`,
     profile.bio ? `Bio: ${profile.bio}` : null,
     profile.skills.length > 0
-      ? `Linguagens principais: ${profile.skills.slice(0, 6).join(', ')}`
+      ? `Tecnologias: ${profile.skills.slice(0, 6).join(', ')}`
       : null,
-    profile.topRepos.length > 0
-      ? `Repositórios em destaque: ${profile.topRepos.join(', ')}`
-      : null,
-    profile.followers ? `Seguidores GitHub: ${profile.followers}` : null,
   ];
+
+  if (profile.repoContext?.length) {
+    lines.push(`Projetos e domínios de conhecimento:\n${formatRepoContext(profile.repoContext)}`);
+  } else if (profile.topRepos.length > 0) {
+    lines.push(`Repositórios: ${profile.topRepos.join(', ')}`);
+  }
+
+  if (profile.followers) lines.push(`Seguidores GitHub: ${profile.followers}`);
+
   return lines.filter(Boolean).join('\n') + buildPreferencesSummary(profile.preferences);
 }
 
@@ -74,14 +90,14 @@ async function findJobsClaude(profile: JobSearchRequest): Promise<Job[]> {
     {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento tech. Use web_search para encontrar vagas reais com suas URLs de candidatura. Ao chamar return_jobs, copie a URL exata de cada vaga encontrada no campo link — nunca deixe link como null.',
+      system: 'Você é um especialista em recrutamento. Analise o perfil do candidato de forma holística — considere os domínios dos projetos, tecnologias e bio para inferir a área de atuação real, que pode ir além de desenvolvimento de software. Use web_search para encontrar vagas reais compatíveis com o perfil completo. Ao chamar return_jobs, copie a URL exata de cada vaga no campo link — nunca deixe link como null.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas de emprego reais publicadas nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no LinkedIn, Glassdoor ou similar. Ignore vagas com mais de ${profile.preferences?.maxAgeDays ?? 90} dias de publicação. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
+          content: `Analise o perfil abaixo e identifique a área de atuação real do candidato com base nos projetos, tecnologias e bio — pode ser desenvolvimento, dados, design, produto, DevOps, finanças, educação, saúde, ou qualquer outra área. Em seguida, pesquise 6 vagas reais publicadas nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com esse perfil no LinkedIn, Glassdoor ou similar. Priorize vagas que aproveitam os domínios de conhecimento do candidato, não apenas as linguagens de programação. Para cada vaga, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois chame return_jobs com os resultados.
 
 PERFIL:
 ${buildProfileSummary(profile)}`,
