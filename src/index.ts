@@ -11,7 +11,12 @@ import authRouter from './routes/auth';
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
-app.use(cors({ origin: process.env.FRONTEND_URL ?? 'http://localhost:5173' }));
+const allowedOrigin = process.env.FRONTEND_URL;
+app.use(cors({
+  origin: allowedOrigin
+    ? allowedOrigin
+    : (origin, cb) => cb(null, !origin || origin.startsWith('http://localhost')),
+}));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (_req, res) => res.sendStatus(200));
