@@ -3,6 +3,7 @@ import { Job, JobSearchRequest, RepoContext, UserPreferences } from '../types';
 import { AdzunaJob, searchAllQueries } from './adzuna';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
+import { resolveJobLink } from './linkVerifier';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
@@ -197,7 +198,10 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
             skills:      { type: 'array', items: { type: 'string' } },
             description: { type: 'string' },
             salary:      { type: ['string', 'null'] },
-            link:        { type: 'string' },
+            link: {
+              type: 'string',
+              description: 'URL da página da vaga em plataforma confiável (Gupy, Indeed, Glassdoor, Catho, InfoJobs). Use apenas se encontrou o link real via web_search — nunca invente. Se não encontrou, retorne string vazia.',
+            },
           },
         },
       },
@@ -210,7 +214,7 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
     {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento. Analise o perfil do candidato de forma holística e use web_search para encontrar vagas reais. Ao chamar return_jobs, copie a URL exata de cada vaga no campo link. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
+      system: 'Você é um especialista em recrutamento. Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas na pesquisa em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn.',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
@@ -229,7 +233,8 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
   if (!toolBlock) throw new Error('Claude não retornou vagas estruturadas');
 
   const result = toolBlock.input as { jobs: Job[] };
-  return Array.isArray(result.jobs) ? result.jobs : [];
+  const jobs = Array.isArray(result.jobs) ? result.jobs : [];
+  return jobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) }));
 }
 
 // --- Entry point ---

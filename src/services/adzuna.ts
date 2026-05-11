@@ -71,6 +71,26 @@ export async function fetchAdzunaJobs(
   }));
 }
 
+const TECH_TITLE_KEYWORDS = [
+  'desenvolvedor', 'developer', 'programador', 'programmer',
+  'engenheiro de software', 'software engineer', 'engenheiro de sistemas',
+  'analista de sistemas', 'analista de ti', 'analista de dados', 'analista de segurança',
+  'cientista de dados', 'data scientist', 'engenheiro de dados', 'data engineer',
+  'devops', 'sre', 'cloud', 'devsecops',
+  'frontend', 'front-end', 'backend', 'back-end', 'fullstack', 'full stack', 'full-stack',
+  'mobile', 'android', 'ios',
+  'machine learning', 'inteligência artificial',
+  'arquiteto de software', 'tech lead', 'líder técnico',
+  'qa engineer', 'quality assurance', 'tester',
+  'segurança da informação', 'cybersecurity',
+  'blockchain', 'embedded', 'embarcado',
+];
+
+function isTechJob(job: AdzunaJob): boolean {
+  const title = job.title.toLowerCase();
+  return TECH_TITLE_KEYWORDS.some((kw) => title.includes(kw));
+}
+
 export async function searchAllQueries(
   queries: string[],
   preferences?: UserPreferences,
@@ -86,6 +106,7 @@ export async function searchAllQueries(
   for (const result of results) {
     if (result.status !== 'fulfilled') continue;
     for (const job of result.value) {
+      if (!isTechJob(job)) continue;
       const id = job.link.split('/').pop() ?? job.link;
       if (!seen.has(id)) {
         seen.add(id);

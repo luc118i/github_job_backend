@@ -25,13 +25,14 @@ const RULES: Rule[] = [
 
   // Frontend
   { signals: ['react', 'nextjs', 'next.js'], title: 'Desenvolvedor React', weight: 9 },
-  { signals: ['vue', 'vuejs', 'nuxt'], title: 'Desenvolvedor Vue.js', weight: 9 },
+  { signals: ['vue', 'vuejs', 'vue.js', 'nuxt'], title: 'Desenvolvedor Vue.js', weight: 9 },
   { signals: ['angular'], title: 'Desenvolvedor Angular', weight: 9 },
-  { signals: ['frontend', 'html', 'css', 'ux', 'ui'], title: 'Desenvolvedor Frontend', weight: 7 },
+  { signals: ['typescript'], title: 'Desenvolvedor TypeScript', weight: 8 },
+  { signals: ['javascript', 'frontend', 'html', 'css', 'ux', 'ui'], title: 'Desenvolvedor Frontend', weight: 7 },
 
   // Backend por linguagem
-  { signals: ['node', 'nodejs', 'express', 'nestjs', 'fastify'], title: 'Desenvolvedor Node.js', weight: 9 },
-  { signals: ['django', 'fastapi', 'flask'], title: 'Desenvolvedor Python Backend', weight: 9 },
+  { signals: ['node', 'nodejs', 'node.js', 'express', 'nestjs', 'fastify'], title: 'Desenvolvedor Node.js', weight: 9 },
+  { signals: ['python', 'django', 'fastapi', 'flask'], title: 'Desenvolvedor Python', weight: 9 },
   { signals: ['spring', 'java', 'quarkus'], title: 'Desenvolvedor Java', weight: 9 },
   { signals: ['dotnet', '.net', 'csharp', 'c#', 'asp.net'], title: 'Desenvolvedor .NET', weight: 9 },
   { signals: ['rails', 'ruby'], title: 'Desenvolvedor Ruby on Rails', weight: 9 },
@@ -40,9 +41,12 @@ const RULES: Rule[] = [
   { signals: ['php', 'laravel', 'symfony'], title: 'Desenvolvedor PHP', weight: 9 },
 
   // Sistemas & Embarcado
-  { signals: ['kernel', 'operating-system', 'linux-kernel', 'embedded', 'firmware'], title: 'Engenheiro de Sistemas', weight: 10 },
+  { signals: ['linux', 'kernel', 'operating-system', 'linux-kernel', 'embedded', 'firmware'], title: 'Engenheiro de Software Linux', weight: 10 },
   { signals: ['arduino', 'raspberry-pi', 'iot', 'rtos'], title: 'Desenvolvedor Embarcado', weight: 9 },
   { signals: ['c', 'cpp', 'c++', 'assembly'], title: 'Desenvolvedor C/C++', weight: 7 },
+
+  // Automação & Scripts
+  { signals: ['bash', 'shell', 'powershell', 'scripting', 'automation', 'makefile'], title: 'Engenheiro DevOps', weight: 6 },
 
   // Segurança
   { signals: ['security', 'cybersecurity', 'pentest', 'infosec', 'ctf', 'cryptography'], title: 'Analista de Segurança', weight: 10 },
@@ -54,7 +58,7 @@ const RULES: Rule[] = [
   { signals: ['game', 'unity', 'unreal', 'gamedev', 'game-development'], title: 'Desenvolvedor de Games', weight: 10 },
 
   // Backend genérico (baixo peso, só entra se nada mais casou)
-  { signals: ['api', 'rest', 'graphql', 'microservices', 'backend'], title: 'Desenvolvedor Backend', weight: 5 },
+  { signals: ['api', 'rest', 'graphql', 'microservices', 'backend', 'sql', 'postgresql', 'mysql', 'mongodb', 'sqlite'], title: 'Desenvolvedor Backend', weight: 5 },
   { signals: ['fullstack', 'full-stack', 'monorepo'], title: 'Desenvolvedor Full Stack', weight: 5 },
 ];
 

@@ -15,7 +15,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, preferences);
+    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, linkedIn.certifications ?? [], preferences);
 
     const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
 

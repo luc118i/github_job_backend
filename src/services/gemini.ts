@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, ProfessionSearchResult, UserPreferences } from '../types';
+import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences } from '../types';
+import { resolveJobLink } from './linkVerifier';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
@@ -40,7 +41,7 @@ function buildPrefsBlock(prefs: UserPreferences | undefined): string {
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
   const maxAge = profile.preferences?.maxAgeDays ?? 90;
-  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas de emprego reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Depois retorne APENAS o JSON.
 
 PERFIL:
 GitHub: ${profile.username}
@@ -59,7 +60,7 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
   "skills": ["skill1", "skill2"],
   "description": "descrição em 2 linhas",
   "salary": null,
-  "link": "https://url-real-da-vaga.com"
+  "link": "URL real encontrada na pesquisa em Gupy/Indeed/Glassdoor/Catho/InfoJobs, ou string vazia se não encontrou"
 }]`;
 
   let lastErr: unknown;
@@ -70,15 +71,18 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
+          'Você é um especialista em recrutamento tech. Sempre responda APENAS com JSON válido, sem texto antes ou depois. No campo link, coloque apenas URLs reais encontradas na pesquisa — nunca invente. Se não encontrou o link exato, deixe como string vazia. NUNCA use links do LinkedIn.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
       console.log(`[jobs/gemini] ${modelName} resposta:`, text.slice(0, 200));
       const parsed = extractJson(text);
-      if (Array.isArray(parsed)) return parsed as Job[];
-      const obj = parsed as Record<string, unknown>;
-      return Array.isArray(obj.jobs) ? (obj.jobs as Job[]) : [];
+      const rawJobs: Job[] = Array.isArray(parsed)
+        ? (parsed as Job[])
+        : Array.isArray((parsed as Record<string, unknown>).jobs)
+          ? ((parsed as Record<string, unknown>).jobs as Job[])
+          : [];
+      return rawJobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) }));
     } catch (err) {
       if (isRetryableError(err)) {
         console.warn(`[jobs/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
@@ -91,9 +95,21 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
   throw lastErr;
 }
 
+function formatCertificationsGemini(certifications: LinkedInCertification[]): string {
+  if (!certifications.length) return '';
+  const items = certifications.map((c) => {
+    const parts = [c.name];
+    if (c.authority) parts.push(`(${c.authority})`);
+    if (c.licenseNumber) parts.push(`nº ${c.licenseNumber}`);
+    return parts.join(' ');
+  });
+  return '\nCertificações e habilitações profissionais: ' + items.join('; ');
+}
+
 export async function findProfessionJobsGemini(
   positions: LinkedInPosition[],
   education: LinkedInEducation[],
+  certifications: LinkedInCertification[],
   preferences?: UserPreferences
 ): Promise<ProfessionSearchResult> {
   const formattedPositions = positions.length
@@ -105,10 +121,10 @@ export async function findProfessionJobsGemini(
     : 'Sem formação';
 
   const maxAge = preferences?.maxAgeDays ?? 90;
-  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Para cada vaga encontrada, inclua obrigatoriamente a URL real da página de candidatura no campo link. Depois retorne APENAS o JSON.
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. Ignore vagas com mais de ${maxAge} dias. NÃO use links do LinkedIn. Depois retorne APENAS o JSON.
 
 Experiência: ${formattedPositions}
-Formação: ${formattedEducation}${buildPrefsBlock(preferences)}
+Formação: ${formattedEducation}${formatCertificationsGemini(certifications)}${buildPrefsBlock(preferences)}
 
 Retorne APENAS este JSON (sem nenhum texto fora do JSON):
 {
@@ -122,7 +138,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
     "tags": ["área de atuação"],
     "description": "descrição concisa em 1-2 linhas",
     "salary": null,
-    "link": "https://url-real-da-vaga.com",
+    "link": "URL real encontrada na pesquisa em Gupy/Indeed/Glassdoor/Catho/InfoJobs, ou string vazia se não encontrou",
     "match": 85
   }]
 }`;
@@ -135,15 +151,16 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: [GOOGLE_SEARCH_TOOL] as any,
         systemInstruction:
-          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. Para cada vaga retornada, o campo link DEVE conter a URL real da página de candidatura encontrada na pesquisa — nunca use null. IMPORTANTE: nunca use links do LinkedIn — use apenas plataformas que permitem ver a vaga sem login, como Glassdoor, Catho, InfoJobs, Gupy, Indeed, Trampos, Vagas.com.br ou site direto da empresa.',
+          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. No campo link, coloque apenas URLs reais encontradas na pesquisa — nunca invente. Se não encontrou o link exato, deixe como string vazia. NUNCA use links do LinkedIn.',
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
       console.log(`[profession/gemini] ${modelName} resposta:`, text.slice(0, 200));
       const parsed = extractJson(text) as Record<string, unknown>;
+      const rawJobs = Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [];
       return {
         profileSummary: (parsed.profileSummary as string) ?? '',
-        jobs: Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [],
+        jobs: rawJobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) })),
       };
     } catch (err) {
       if (isRetryableError(err)) {

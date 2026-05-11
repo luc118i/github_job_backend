@@ -1,6 +1,6 @@
 import AdmZip from 'adm-zip';
 import { parse } from 'csv-parse/sync';
-import { LinkedInData, LinkedInPosition, LinkedInEducation } from '../types';
+import { LinkedInData, LinkedInPosition, LinkedInEducation, LinkedInCertification } from '../types';
 
 function findCsv(zip: AdmZip, filename: string): string | null {
   const entry = zip.getEntries().find(
@@ -63,6 +63,21 @@ function parseProfile(zip: AdmZip): { name: string | null; phone: string | null 
   return { name, phone };
 }
 
+function parseCertifications(zip: AdmZip): LinkedInCertification[] {
+  const csv = findCsv(zip, 'Certifications.csv');
+  if (!csv) return [];
+
+  const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+
+  return records.map((r) => ({
+    name: r['Name'] ?? '',
+    authority: r['Authority'] || null,
+    licenseNumber: r['License Number'] || null,
+    startedOn: r['Started On'] || null,
+    finishedOn: r['Finished On'] || null,
+  }));
+}
+
 function parseEmail(zip: AdmZip): string | null {
   const csv = findCsv(zip, 'Email Addresses.csv') ?? findCsv(zip, 'EmailAddresses.csv');
   if (!csv) return null;
@@ -81,5 +96,6 @@ export function parseLinkedInZip(buffer: Buffer): LinkedInData {
     phone,
     positions: parsePositions(zip),
     education: parseEducation(zip),
+    certifications: parseCertifications(zip),
   };
 }

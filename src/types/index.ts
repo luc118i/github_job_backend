@@ -73,12 +73,21 @@ export interface LinkedInEducation {
   notes: string | null;
 }
 
+export interface LinkedInCertification {
+  name: string;
+  authority: string | null;
+  licenseNumber: string | null;
+  startedOn: string | null;
+  finishedOn: string | null;
+}
+
 export interface LinkedInData {
   name: string | null;
   email: string | null;
   phone: string | null;
   positions: LinkedInPosition[];
   education: LinkedInEducation[];
+  certifications: LinkedInCertification[];
 }
 
 export interface GitHubRepoEnriched {

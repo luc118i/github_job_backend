@@ -25,10 +25,13 @@ export async function parseLinkedInPdf(buffer: Buffer): Promise<LinkedInData> {
   ],
   "education": [
     {"school": "string", "degree": "string|null", "startDate": "string|null", "endDate": "string|null", "notes": "string|null"}
+  ],
+  "certifications": [
+    {"name": "string", "authority": "string|null", "licenseNumber": "string|null", "startedOn": "string|null", "finishedOn": "string|null"}
   ]
 }
 
-finishedOn null = emprego atual. Retorne null para campos não encontrados. Retorne arrays vazios se não encontrar dados.
+finishedOn null = emprego atual ou sem expiração. Retorne null para campos não encontrados. Retorne arrays vazios se não encontrar dados. Inclua aprovações em exames profissionais (OAB, CRM, CREA, CRC, CFA, etc.) no campo certifications.
 
 TEXTO DO PDF:
 ${text.slice(0, 4000)}`,
@@ -50,5 +53,6 @@ ${text.slice(0, 4000)}`,
     phone: (parsed.phone as string | null | undefined) ?? null,
     positions: Array.isArray(parsed.positions) ? parsed.positions : [],
     education: Array.isArray(parsed.education) ? parsed.education : [],
+    certifications: Array.isArray(parsed.certifications) ? parsed.certifications : [],
   };
 }

@@ -3,6 +3,7 @@ import { LinkStatus } from '../types';
 const TRUSTED_DOMAINS = new Set([
   'linkedin.com',
   'glassdoor.com',
+  'glassdoor.com.br',
   'indeed.com',
   'gupy.io',
   'vagas.com.br',
@@ -50,6 +51,19 @@ function isTrusted(hostname: string): boolean {
   return false;
 }
 
+export function resolveJobLink(aiLink: string | null | undefined, title: string, company: string): string {
+  if (aiLink) {
+    try {
+      const { hostname } = new URL(aiLink);
+      if (isTrusted(hostname)) return aiLink;
+    } catch {
+      // URL inválida, ignora
+    }
+  }
+  const q = encodeURIComponent(`${title} ${company}`.trim());
+  return `https://br.indeed.com/jobs?q=${q}&l=Brasil`;
+}
+
 export async function verifyLink(url: string | null): Promise<LinkStatus> {
   if (!url) return 'none';
 
@@ -65,8 +79,8 @@ export async function verifyLink(url: string | null): Promise<LinkStatus> {
   const hostname = parsed.hostname;
 
   if (isSuspicious(hostname)) return 'none';
+  if (isTrusted(hostname)) return 'trusted';   // trusted antes de isSearchResultPage para aceitar URLs de busca em plataformas confiáveis
   if (isSearchResultPage(url)) return 'none';
-  if (isTrusted(hostname)) return 'trusted';
 
   try {
     const controller = new AbortController();
