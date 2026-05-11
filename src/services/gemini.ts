@@ -10,9 +10,17 @@ const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash
 
 function extractJson(text: string): unknown {
   const clean = text.replace(/```json|```/g, '').trim();
+  if (!clean) throw new Error('Gemini retornou resposta vazia');
   const match = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!match) throw new Error('Gemini não retornou JSON válido');
   return JSON.parse(match[0]);
+}
+
+function isRetryableError(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  if (status === 503 || status === 429) return true;
+  const msg = (err as Error).message ?? '';
+  return msg.includes('vazia') || msg.includes('JSON válido') || msg.includes('JSON.parse') || msg.includes('Unexpected token');
 }
 
 function buildPrefsBlock(prefs: UserPreferences | undefined): string {
@@ -72,9 +80,8 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
       const obj = parsed as Record<string, unknown>;
       return Array.isArray(obj.jobs) ? (obj.jobs as Job[]) : [];
     } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 503 || status === 429) {
-        console.warn(`[jobs/gemini] ${modelName} indisponível (${status}), tentando próximo...`);
+      if (isRetryableError(err)) {
+        console.warn(`[jobs/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
         lastErr = err;
         continue;
       }
@@ -139,9 +146,8 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
         jobs: Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [],
       };
     } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 503 || status === 429) {
-        console.warn(`[profession/gemini] ${modelName} indisponível (${status}), tentando próximo...`);
+      if (isRetryableError(err)) {
+        console.warn(`[profession/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
         lastErr = err;
         continue;
       }

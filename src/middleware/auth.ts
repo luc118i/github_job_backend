@@ -8,7 +8,7 @@ export interface AuthRequest extends Request {
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
-    res.status(401).json({ error: 'Token requerido' });
+    res.status(401).json({ error: 'Sessão não autenticada. Faça login para continuar.' });
     return;
   }
   try {
@@ -16,7 +16,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     req.userId = payload.userId;
     next();
   } catch {
-    res.status(401).json({ error: 'Token inválido' });
+    res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.' });
   }
 }
 

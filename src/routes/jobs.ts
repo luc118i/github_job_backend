@@ -11,7 +11,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   const profile = req.body as JobSearchRequest;
 
   if (!profile.username) {
-    res.status(400).json({ error: 'Perfil inválido' });
+    res.status(400).json({ error: 'Informe o usuário do GitHub para buscar vagas' });
     return;
   }
 

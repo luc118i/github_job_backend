@@ -25,7 +25,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   };
 
   if (!url || !url.startsWith('http')) {
-    res.status(400).json({ error: 'URL invalida' });
+    res.status(400).json({ error: 'URL inválida. Informe um endereço começando com http:// ou https://' });
     return;
   }
 

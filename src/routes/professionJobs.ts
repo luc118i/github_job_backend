@@ -10,7 +10,7 @@ router.post('/', async (req: Request, res: Response) => {
   const { linkedIn, preferences } = req.body as { linkedIn: LinkedInData; preferences?: UserPreferences };
 
   if (!linkedIn?.positions?.length && !linkedIn?.education?.length) {
-    res.status(400).json({ error: 'Perfil LinkedIn necessário' });
+    res.status(400).json({ error: 'Importe seu perfil do LinkedIn antes de buscar vagas' });
     return;
   }
 

@@ -12,7 +12,7 @@ router.get('/', async (_req: Request, res: Response) => {
     .limit(300);
 
   if (error) {
-    res.status(500).json({ error: 'Erro ao buscar histórico' });
+    res.status(500).json({ error: 'Erro ao carregar o histórico de buscas. Tente novamente.' });
     return;
   }
 

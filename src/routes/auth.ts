@@ -148,7 +148,7 @@ router.patch('/linkedin', requireAuth, async (req: AuthRequest, res: Response) =
   const { linkedInData } = req.body as { linkedInData: LinkedInData };
 
   if (!linkedInData) {
-    res.status(400).json({ error: 'linkedInData é obrigatório' });
+    res.status(400).json({ error: 'Dados do LinkedIn são obrigatórios' });
     return;
   }
 

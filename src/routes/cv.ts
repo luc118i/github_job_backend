@@ -21,7 +21,7 @@ router.post('/', async (req: Request, res: Response) => {
   const body = req.body as CvRequest;
 
   if (!body?.job?.id || !body?.candidate?.name) {
-    res.status(400).json({ error: 'Dados insuficientes para gerar CV' });
+    res.status(400).json({ error: 'Dados insuficientes para gerar o CV. Informe a vaga e o nome do candidato.' });
     return;
   }
 
@@ -62,7 +62,7 @@ router.get('/job/:jobId', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   const { content } = req.body as { content?: string };
   if (!content) {
-    res.status(400).json({ error: 'content obrigatório' });
+    res.status(400).json({ error: 'O conteúdo do CV é obrigatório' });
     return;
   }
   const { error } = await supabase

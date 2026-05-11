@@ -199,7 +199,7 @@ Regras:
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'analyze_job'
   );
 
-  if (!toolBlock) throw new Error('Nao foi possivel analisar a vaga. Tente novamente.');
+  if (!toolBlock) throw new Error('Não foi possível extrair os dados da vaga. Verifique se o link é válido e tente novamente.');
 
   return toolBlock.input as LinkAnalysisResult;
 }
