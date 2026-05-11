@@ -72,8 +72,9 @@ const RANK_JOBS_TOOL: Anthropic.Tool = {
         maxItems: 10,
         items: {
           type: 'object',
-          required: ['title', 'company', 'level', 'remote', 'skills', 'description', 'link'],
+          required: ['index', 'title', 'company', 'level', 'remote', 'skills', 'description'],
           properties: {
+            index:       { type: 'number', description: 'Número [N] da vaga na listagem fornecida.' },
             title:       { type: 'string' },
             company:     { type: 'string' },
             level:       { type: 'string', enum: ['Junior', 'Pleno', 'Senior'] },
@@ -82,7 +83,6 @@ const RANK_JOBS_TOOL: Anthropic.Tool = {
             skills:      { type: 'array', items: { type: 'string' } },
             description: { type: 'string', description: '2 frases explicando por que essa vaga combina com o perfil' },
             salary:      { type: ['string', 'null'] },
-            link:        { type: 'string', description: 'Use o link original da vaga, sem alteração.' },
           },
         },
       },
@@ -92,13 +92,13 @@ const RANK_JOBS_TOOL: Anthropic.Tool = {
 
 async function rankJobs(profile: JobSearchRequest, rawJobs: AdzunaJob[]): Promise<Job[]> {
   const jobsList = rawJobs
-    .map((j, i) => `[${i + 1}] ${j.title} — ${j.company} | ${j.location}${j.salary ? ` | ${j.salary}` : ''}\n${j.description}\nLink: ${j.link}`)
+    .map((j, i) => `[${i + 1}] ${j.title} — ${j.company} | ${j.location}${j.salary ? ` | ${j.salary}` : ''}\n${j.description}`)
     .join('\n\n');
 
   const message = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 2048,
-    system: 'Você é um especialista em recrutamento. Analise as vagas listadas e selecione as 3 a 6 mais relevantes para o perfil do candidato. Para cada vaga selecionada, determine o nível (Junior/Pleno/Senior), se é remota, extraia as principais skills exigidas e escreva 2 frases explicando por que combina com o perfil. Preserve o link original intacto.',
+    system: 'Você é um especialista em recrutamento. Analise as vagas listadas e selecione as 3 a 6 mais relevantes para o perfil do candidato. Para cada vaga selecionada, use o índice numérico exato [N] da listagem no campo "index". Determine o nível (Junior/Pleno/Senior), se é remota, extraia as principais skills exigidas e escreva 2 frases explicando por que combina com o perfil.',
     tools: [RANK_JOBS_TOOL],
     tool_choice: { type: 'tool', name: 'rank_jobs' },
     messages: [{
@@ -113,8 +113,15 @@ async function rankJobs(profile: JobSearchRequest, rawJobs: AdzunaJob[]): Promis
 
   if (!toolBlock) throw new Error('Claude não ranqueou as vagas');
 
-  const result = toolBlock.input as { jobs: Job[] };
-  return Array.isArray(result.jobs) ? result.jobs : [];
+  const result = toolBlock.input as { jobs: (Job & { index?: number })[] };
+  const ranked = Array.isArray(result.jobs) ? result.jobs : [];
+
+  // Restaura os links originais do Adzuna para evitar que a IA modifique as URLs
+  return ranked.map((job) => {
+    const originalIndex = typeof job.index === 'number' ? job.index - 1 : -1;
+    const original = rawJobs[originalIndex];
+    return { ...job, link: original?.link ?? job.link };
+  });
 }
 
 function rankJobsHeuristic(rawJobs: AdzunaJob[]): Job[] {

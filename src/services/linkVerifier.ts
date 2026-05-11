@@ -26,10 +26,20 @@ const TRUSTED_DOMAINS = new Set([
   'adzuna.com.br',
 ]);
 
+const SEARCH_RESULT_PATTERNS = [
+  /[?&](q|query|search|busca|keyword|s)=/i,
+  /\/(jobs|vagas|emprego|search|buscar|results?)\/?$/i,
+  /\/(jobs|vagas|emprego|search)\?/i,
+];
+
 function isSuspicious(hostname: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
   const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq'];
   return suspiciousTLDs.some((tld) => hostname.endsWith(tld));
+}
+
+function isSearchResultPage(url: string): boolean {
+  return SEARCH_RESULT_PATTERNS.some((re) => re.test(url));
 }
 
 function isTrusted(hostname: string): boolean {
@@ -55,18 +65,22 @@ export async function verifyLink(url: string | null): Promise<LinkStatus> {
   const hostname = parsed.hostname;
 
   if (isSuspicious(hostname)) return 'none';
+  if (isSearchResultPage(url)) return 'none';
   if (isTrusted(hostname)) return 'trusted';
 
   try {
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 4000);
+    const tid = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(url, {
       method: 'HEAD',
       signal: controller.signal,
       redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobFinder/1.0)' },
     });
     clearTimeout(tid);
-    return res.status < 400 || res.status === 405 ? 'unverified' : 'dead';
+    // 403/429 = site bloqueia bots mas o link existe; 405 = HEAD não suportado mas link existe
+    const liveStatuses = [403, 405, 429];
+    return res.status < 400 || liveStatuses.includes(res.status) ? 'unverified' : 'dead';
   } catch {
     return 'dead';
   }
