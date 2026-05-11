@@ -11,11 +11,18 @@ import authRouter from './routes/auth';
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
-const allowedOrigin = process.env.FRONTEND_URL;
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
 app.use(cors({
-  origin: allowedOrigin
-    ? allowedOrigin
-    : (origin, cb) => cb(null, !origin || origin.startsWith('http://localhost')),
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.length === 0) return cb(null, origin.startsWith('http://localhost'));
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    console.warn(`[CORS] origem bloqueada: ${origin} | permitidas: ${allowedOrigins.join(', ')}`);
+    cb(new Error(`Origin not allowed: ${origin}`));
+  },
 }));
 app.use(express.json({ limit: '2mb' }));
 
