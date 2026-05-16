@@ -1,4 +1,5 @@
 import { UserPreferences } from '../types';
+import { isBlocked } from '../utils/inferCategory';
 
 interface AdzunaRawJob {
   id: string;
@@ -113,6 +114,11 @@ export async function searchAllQueries(
         jobs.push(job);
       }
     }
+  }
+
+  // Filtra categorias bloqueadas usando o mesmo mapa de inferência do frontend
+  if (blockedKeywords?.length) {
+    return jobs.filter((j) => !isBlocked(j.title, blockedKeywords));
   }
 
   return jobs;

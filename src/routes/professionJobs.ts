@@ -7,7 +7,11 @@ import { LinkedInData, UserPreferences } from '../types';
 const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
-  const { linkedIn, preferences } = req.body as { linkedIn: LinkedInData; preferences?: UserPreferences };
+  const { linkedIn, preferences, blockedKeywords } = req.body as {
+    linkedIn: LinkedInData;
+    preferences?: UserPreferences;
+    blockedKeywords?: string[];
+  };
 
   if (!linkedIn?.positions?.length && !linkedIn?.education?.length) {
     res.status(400).json({ error: 'Importe seu perfil do LinkedIn antes de buscar vagas' });
@@ -15,7 +19,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, linkedIn.certifications ?? [], preferences);
+    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, linkedIn.certifications ?? [], preferences, blockedKeywords);
 
     const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
 

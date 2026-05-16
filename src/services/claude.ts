@@ -96,10 +96,14 @@ async function rankJobs(profile: JobSearchRequest, rawJobs: AdzunaJob[]): Promis
     .map((j, i) => `[${i + 1}] ${j.title} — ${j.company} | ${j.location}${j.salary ? ` | ${j.salary}` : ''}\n${j.description}`)
     .join('\n\n');
 
+  const blockedNote = profile.blockedKeywords?.length
+    ? ` NÃO selecione vagas das categorias: ${profile.blockedKeywords.join(', ')}.`
+    : '';
+
   const message = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 2048,
-    system: 'Você é um especialista em recrutamento. Analise as vagas listadas e selecione as 3 a 6 mais relevantes para o perfil do candidato. Para cada vaga selecionada, use o índice numérico exato [N] da listagem no campo "index". Determine o nível (Junior/Pleno/Senior), se é remota, extraia as principais skills exigidas e escreva 2 frases explicando por que combina com o perfil.',
+    system: `Você é um especialista em recrutamento. Analise as vagas listadas e selecione as 3 a 6 mais relevantes para o perfil do candidato.${blockedNote} Para cada vaga selecionada, use o índice numérico exato [N] da listagem no campo "index". Determine o nível (Junior/Pleno/Senior), se é remota, extraia as principais skills exigidas e escreva 2 frases explicando por que combina com o perfil.`,
     tools: [RANK_JOBS_TOOL],
     tool_choice: { type: 'tool', name: 'rank_jobs' },
     messages: [{
@@ -210,11 +214,15 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
 };
 
 async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
+  const blockedNote = profile.blockedKeywords?.length
+    ? ` NÃO inclua vagas das categorias: ${profile.blockedKeywords.join(', ')}.`
+    : '';
+
   const message = await client.messages.create(
     {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: 'Você é um especialista em recrutamento. Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas na pesquisa em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn.',
+      system: `Você é um especialista em recrutamento. Use web_search para encontrar vagas reais.${blockedNote} No campo link, coloque apenas URLs reais encontradas na pesquisa em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn.`,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
