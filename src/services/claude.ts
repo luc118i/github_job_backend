@@ -4,6 +4,9 @@ import { AdzunaJob, searchAllQueries } from './adzuna';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
+import { fetchProgramathorJobs } from './programathor';
+import { fetchRemotiveJobs } from './remotive';
+import { isBlocked } from '../utils/inferCategory';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
@@ -158,22 +161,55 @@ function rankJobsHeuristic(rawJobs: AdzunaJob[]): Job[] {
   });
 }
 
+// Filtra vagas externas (Programathor/Remotive) por relevância ao perfil e categorias bloqueadas
+function filterRelevant(jobs: AdzunaJob[], profile: JobSearchRequest, queries: string[]): AdzunaJob[] {
+  const keywords = [...profile.skills, ...queries].map((k) => k.toLowerCase());
+  return jobs.filter((j) => {
+    if (isBlocked(j.title, profile.blockedKeywords ?? [])) return false;
+    const text = `${j.title} ${j.description}`.toLowerCase();
+    return keywords.some((kw) => text.includes(kw));
+  });
+}
+
 async function findJobsAdzuna(profile: JobSearchRequest): Promise<Job[]> {
   const baseQueries = buildSearchQueries(profile);
   const extraQueries = (profile.likedKeywords ?? []).filter((kw) => !baseQueries.includes(kw));
   const queries = [...baseQueries, ...extraQueries].slice(0, 6);
-  console.log('[jobs/adzuna] queries geradas:', queries);
+  console.log('[jobs] queries geradas:', queries);
 
-  const rawJobs = await searchAllQueries(queries, profile.preferences, profile.blockedKeywords);
-  console.log(`[jobs/adzuna] ${rawJobs.length} vagas brutas encontradas`);
+  // Busca nas 3 fontes em paralelo — Programathor e Remotive nunca bloqueiam o fluxo (retornam [] se falharem)
+  const [adzunaJobs, programathorJobs, remotiveJobs] = await Promise.all([
+    searchAllQueries(queries, profile.preferences, profile.blockedKeywords),
+    fetchProgramathorJobs(),
+    fetchRemotiveJobs(profile.skills),
+  ]);
 
-  if (rawJobs.length < 3) throw new Error('Adzuna retornou vagas insuficientes');
+  console.log(`[jobs] adzuna: ${adzunaJobs.length} | programathor: ${programathorJobs.length} | remotive: ${remotiveJobs.length}`);
+
+  // Merge: Adzuna já filtrado; Programathor e Remotive filtrados por relevância
+  const merged = [
+    ...adzunaJobs,
+    ...filterRelevant(programathorJobs, profile, queries),
+    ...filterRelevant(remotiveJobs, profile, queries),
+  ];
+
+  // Deduplica por link
+  const seen = new Set<string>();
+  const unique = merged.filter((j) => {
+    if (seen.has(j.link)) return false;
+    seen.add(j.link);
+    return true;
+  });
+
+  console.log(`[jobs] total após merge + dedup: ${unique.length}`);
+
+  if (unique.length < 3) throw new Error('Fontes retornaram vagas insuficientes');
 
   try {
-    return await rankJobs(profile, rawJobs);
+    return await rankJobs(profile, unique);
   } catch (err) {
-    console.warn('[jobs/adzuna] ranking por IA falhou, usando ranking heurístico:', (err as Error).message);
-    return rankJobsHeuristic(rawJobs);
+    console.warn('[jobs] ranking por IA falhou, usando ranking heurístico:', (err as Error).message);
+    return rankJobsHeuristic(unique);
   }
 }
 
