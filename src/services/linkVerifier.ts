@@ -25,6 +25,9 @@ const TRUSTED_DOMAINS = new Set([
   'hipsters.jobs',
   'adzuna.com',
   'adzuna.com.br',
+  // Plataformas jurídicas brasileiras
+  'jusbrasil.com.br',
+  'conjur.com.br',
 ]);
 
 const SEARCH_RESULT_PATTERNS = [
