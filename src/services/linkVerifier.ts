@@ -61,13 +61,50 @@ function isHomepage(url: string): boolean {
   }
 }
 
+// Detecta páginas de categoria/listagem de plataformas conhecidas que a IA costuma gerar
+// em vez de links de vagas específicas.
+// Catho: /vagas/[keyword]/ (2 segmentos, sem número) = categoria
+//        /vagas/emprego/[slug-com-id]/ (3 seg + número) = vaga real
+// Indeed: /m/basecamp?... ou /rc/clk?... = redirect genérico
+function isPlatformCategoryPage(url: string): boolean {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const host = hostname.replace(/^www\./, '');
+    const segs = pathname.split('/').filter(Boolean);
+
+    if (host.endsWith('catho.com.br')) {
+      // /vagas ou /vagas/[keyword-sem-numero] = categoria, não vaga
+      if (segs[0] === 'vagas' && segs.length <= 2 && !/\d/.test(segs[1] ?? '')) return true;
+    }
+
+    if (host.endsWith('indeed.com') || host.endsWith('indeed.com.br')) {
+      // /rc/clk, /m/basecamp etc = redirects genéricos, não vagas
+      if (/^\/(rc|m|l|cmp)\//.test(pathname)) return true;
+    }
+
+    if (host.endsWith('glassdoor.com') || host.endsWith('glassdoor.com.br')) {
+      // /Jobs/ sem ID numérico no path = listagem de categoria
+      if (/\/Jobs\/[^?#]*$/.test(pathname) && !/[A-Z]{2}\d{3,}/.test(pathname)) return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveJobLink(aiLink: string | null | undefined, title: string, company: string): string {
   if (aiLink) {
     try {
       const { hostname } = new URL(aiLink);
       // Aceita apenas URLs de domínio confiável que apontem para uma vaga específica —
-      // rejeita homepages (ex: https://gupy.io/) e páginas de busca (ex: https://indeed.com/jobs?q=...)
-      if (isTrusted(hostname) && !isHomepage(aiLink) && !isSearchResultPage(aiLink)) {
+      // rejeita homepages, páginas de busca e páginas de categoria
+      if (
+        isTrusted(hostname) &&
+        !isHomepage(aiLink) &&
+        !isSearchResultPage(aiLink) &&
+        !isPlatformCategoryPage(aiLink)
+      ) {
         return aiLink;
       }
     } catch {
