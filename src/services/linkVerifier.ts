@@ -51,15 +51,30 @@ function isTrusted(hostname: string): boolean {
   return false;
 }
 
+// Rejeita URLs sem path significativo (home da plataforma)
+function isHomepage(url: string): boolean {
+  try {
+    const { pathname } = new URL(url);
+    return pathname === '/' || pathname === '';
+  } catch {
+    return true;
+  }
+}
+
 export function resolveJobLink(aiLink: string | null | undefined, title: string, company: string): string {
   if (aiLink) {
     try {
       const { hostname } = new URL(aiLink);
-      if (isTrusted(hostname)) return aiLink;
+      // Aceita apenas URLs de domínio confiável que apontem para uma vaga específica —
+      // rejeita homepages (ex: https://gupy.io/) e páginas de busca (ex: https://indeed.com/jobs?q=...)
+      if (isTrusted(hostname) && !isHomepage(aiLink) && !isSearchResultPage(aiLink)) {
+        return aiLink;
+      }
     } catch {
       // URL inválida, ignora
     }
   }
+  // Fallback: busca pelo título + empresa no Indeed
   const q = encodeURIComponent(`${title} ${company}`.trim());
   return `https://br.indeed.com/jobs?q=${q}&l=Brasil`;
 }
