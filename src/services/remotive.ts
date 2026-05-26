@@ -63,6 +63,7 @@ export async function searchRemotiveJobs(
           location: job.candidate_required_location || 'Remoto',
           salary: job.salary || undefined,
           source: 'Remotive',
+          published_at: job.publication_date ?? undefined,
         });
       }
     }

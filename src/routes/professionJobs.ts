@@ -2,15 +2,18 @@ import { Router, Request, Response } from 'express';
 import { findProfessionJobs } from '../services/genericJobFinder';
 import { verifyLink } from '../services/linkVerifier';
 import { supabase } from '../services/supabase';
-import { LinkedInData, UserPreferences } from '../types';
+import { CareerProfile, LinkedInData, UserPreferences } from '../types';
 
 const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
-  const { linkedIn, preferences, blockedKeywords } = req.body as {
+  const { linkedIn, preferences, blockedKeywords, blockedSources, likedSources, careerProfile } = req.body as {
     linkedIn: LinkedInData;
     preferences?: UserPreferences;
     blockedKeywords?: string[];
+    blockedSources?: string[];
+    likedSources?: string[];
+    careerProfile?: CareerProfile;
   };
 
   if (!linkedIn?.positions?.length && !linkedIn?.education?.length) {
@@ -19,7 +22,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, linkedIn.certifications ?? [], preferences, blockedKeywords);
+    const result = await findProfessionJobs(linkedIn.positions, linkedIn.education, linkedIn.certifications ?? [], preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
 
     const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
 
@@ -36,6 +39,9 @@ router.post('/', async (req: Request, res: Response) => {
         link: job.link || null,
         match: typeof job.match === 'number' ? job.match : 0,
         link_status: await verifyLink(job.link || null),
+        ...((job as { published_at?: string | null }).published_at
+          ? { published_at: (job as { published_at?: string | null }).published_at }
+          : {}),
       }))
     );
 

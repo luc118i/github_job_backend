@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences } from '../types';
+import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
 import { searchRemotiveJobs } from './remotive';
 import { searchGupyJobs } from './gupy';
 import { findProfessionJobsGemini } from './gemini';
@@ -50,6 +50,71 @@ function formatCertifications(certifications: LinkedInCertification[]): string {
   return '\nCertificações e habilitações profissionais: ' + items.join('; ');
 }
 
+const WORK_STYLE_LABELS: Record<string, string> = {
+  analytical: 'analítico (dados e resolução de problemas)',
+  creative: 'criativo (inovação e design)',
+  operational: 'operacional (processos e execução)',
+  relational: 'relacional (pessoas e comunicação)',
+};
+
+const TECH_LABELS: Record<string, string> = {
+  basic: 'básico',
+  intermediate: 'intermediário',
+  advanced: 'avançado',
+};
+
+const LEADERSHIP_LABELS: Record<string, string> = {
+  low: 'pouca',
+  medium: 'moderada',
+  high: 'forte',
+};
+
+function buildCareerProfileBlock(profile?: CareerProfile): string {
+  if (!profile) return '';
+
+  const lines: string[] = ['\nPERFIL DE CARREIRA (use isto para personalizar a busca):'];
+
+  lines.push(`Objetivo: ${profile.careerGoals}`);
+
+  if (profile.personalitySummary) {
+    lines.push(`Perfil comportamental: ${profile.personalitySummary}`);
+  }
+
+  if (profile.workStyle.length) {
+    lines.push(`Estilo de trabalho: ${profile.workStyle.map((s) => WORK_STYLE_LABELS[s] ?? s).join(', ')}`);
+  }
+
+  lines.push(`Capacidade de liderança: ${LEADERSHIP_LABELS[profile.leadershipLevel] ?? profile.leadershipLevel}`);
+  lines.push(`Nível com tecnologia: ${TECH_LABELS[profile.techLiteracy] ?? profile.techLiteracy}`);
+
+  if (profile.hiddenSkills.length) {
+    lines.push(`Habilidades não evidentes no currículo: ${profile.hiddenSkills.join(', ')}`);
+  }
+
+  if (profile.transitionReady && profile.transitionTarget) {
+    lines.push(`TRANSICAO DE CARREIRA: o candidato quer migrar para "${profile.transitionTarget}". Priorize vagas nessa área, mesmo sem experiência formal. Busque vagas que valorizem habilidades transferíveis.`);
+  } else if (profile.desiredAreas.length) {
+    lines.push(`Áreas de interesse: ${profile.desiredAreas.join(', ')}`);
+  }
+
+  if (profile.blockedAreas.length) {
+    lines.push(`IMPORTANTE — não retorne vagas nestas áreas: ${profile.blockedAreas.join(', ')}`);
+  }
+
+  if (profile.potentialSummary) {
+    lines.push(`Potencial a explorar: ${profile.potentialSummary}`);
+  }
+
+  return '\n' + lines.join('\n');
+}
+
+function buildSourcePrefsBlock(blocked?: string[], liked?: string[]): string {
+  const lines: string[] = [];
+  if (blocked?.length) lines.push(`Evite vagas das fontes: ${blocked.join(', ')}`);
+  if (liked?.length) lines.push(`Priorize vagas das fontes: ${liked.join(', ')}`);
+  return lines.length ? '\n' + lines.join('\n') : '';
+}
+
 function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
   if (!prefs) return '';
   const lines: string[] = [];
@@ -80,14 +145,16 @@ function extractCurrentTitle(positions: LinkedInPosition[]): string | null {
 async function prefetchDirectJobs(
   positions: LinkedInPosition[],
   preferences?: UserPreferences,
+  blockedSources?: string[],
 ): Promise<string> {
   const title = extractCurrentTitle(positions);
   if (!title) return '';
 
   const queries = [title];
+  const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
   const [remotive, gupy] = await Promise.all([
-    searchRemotiveJobs(queries, preferences).catch(() => []),
-    searchGupyJobs(queries, preferences).catch(() => []),
+    blocked.includes('remotive') ? Promise.resolve([]) : searchRemotiveJobs(queries, preferences).catch(() => []),
+    blocked.includes('gupy')     ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
   ]);
 
   const jobs = [...remotive, ...gupy];
@@ -108,7 +175,7 @@ async function prefetchDirectJobs(
 
 const RETURN_JOBS_TOOL: Anthropic.Tool = {
   name: 'return_jobs',
-  description: 'Retorna as vagas encontradas. Sempre chame esta função ao final com todas as vagas pesquisadas.',
+  description: 'Retorna as vagas encontradas. OBRIGATÓRIO: sempre chame esta função ao final, mesmo que tenha encontrado apenas 1 vaga. Nunca responda com texto sem chamar return_jobs.',
   input_schema: {
     type: 'object' as const,
     required: ['profileSummary', 'jobs'],
@@ -119,7 +186,7 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
       },
       jobs: {
         type: 'array',
-        minItems: 3,
+        minItems: 1,
         maxItems: 8,
         items: {
           type: 'object',
@@ -152,8 +219,11 @@ async function findProfessionJobsClaude(
   education: LinkedInEducation[],
   certifications: LinkedInCertification[],
   preferences?: UserPreferences,
-  blockedKeywords?: string[]
-): Promise<ProfessionSearchResult> {
+  blockedKeywords?: string[],
+  blockedSources?: string[],
+  likedSources?: string[],
+  careerProfile?: CareerProfile,
+): Promise<ProfessionSearchResult | null> {
   const lawProfile = isLawProfile(positions);
   const specialties = lawProfile ? extractLawSpecialties(positions) : [];
 
@@ -163,8 +233,8 @@ async function findProfessionJobsClaude(
 
   // Prompt e plataformas adaptados para perfil jurídico
   const systemPrompt = lawProfile
-    ? `Você é um especialista em recrutamento jurídico.${blockedNote} Use web_search para encontrar vagas reais em plataformas jurídicas brasileiras: Jusbrasil Empregos (jusbrasil.com.br/empregos), Conjur (conjur.com.br), Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia e departamentos jurídicos de empresas. No campo link, coloque apenas URLs reais encontradas — nunca invente. NUNCA use links do LinkedIn.`
-    : `Você é um especialista em recrutamento para todas as áreas profissionais.${blockedNote} Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn.`;
+    ? `Você é um especialista em recrutamento jurídico.${blockedNote} Use web_search para encontrar vagas reais em plataformas jurídicas brasileiras: Jusbrasil Empregos (jusbrasil.com.br/empregos), Conjur (conjur.com.br), Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia e departamentos jurídicos de empresas. No campo link, coloque apenas URLs reais encontradas — nunca invente. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas.`
+    : `Você é um especialista em recrutamento para todas as áreas profissionais.${blockedNote} Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.`;
 
   const specialtiesNote = specialties.length
     ? `\nÁreas de especialização identificadas: ${specialties.join(', ')}. Priorize vagas nessas áreas.`
@@ -174,10 +244,16 @@ async function findProfessionJobsClaude(
     ? 'Jusbrasil Empregos, Conjur, Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia'
     : JOB_PLATFORMS;
 
-  // Pre-fetch from free APIs in parallel while building the prompt
-  const directJobsBlock = lawProfile ? '' : await prefetchDirectJobs(positions, preferences);
+  // Pre-fetch from free APIs in parallel while building the prompt (skip for law profiles — legal sources fetched later)
+  const directJobsBlock = lawProfile ? '' : await prefetchDirectJobs(positions, preferences, blockedSources);
 
   const maxAge = preferences?.maxAgeDays ?? 90;
+
+  // When the user wants a career transition, search for the target area, not their history
+  const searchFocus = careerProfile?.transitionReady && careerProfile.transitionTarget
+    ? `O candidato quer transicionar para "${careerProfile.transitionTarget}". Busque vagas nessa área que valorizem habilidades transferíveis. NÃO se limite ao histórico profissional listado.`
+    : '';
+
 
   const message = await client.messages.create(
     {
@@ -190,12 +266,12 @@ async function findProfessionJobsClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo em: ${platformNote}. NÃO use links do LinkedIn. Para vagas em redes sociais (X, Facebook, Instagram), priorize o link direto no site da empresa. Inclua a URL real de cada vaga. Chame return_jobs com os resultados.${specialtiesNote}${directJobsBlock}
+          content: `${searchFocus ? searchFocus + ' ' : ''}Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo em: ${platformNote}. NÃO use links do LinkedIn. Para vagas em redes sociais (X, Facebook, Instagram), priorize o link direto no site da empresa. Inclua a URL real de cada vaga.${specialtiesNote}${directJobsBlock}
 
 Experiência: ${formatPositions(positions)}
-Formação: ${formatEducation(education)}${formatCertifications(certifications)}${buildProfessionPrefsBlock(preferences)}
+Formação: ${formatEducation(education)}${formatCertifications(certifications)}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
 
-Após a busca, chame return_jobs com 4 a 8 vagas mais relevantes (combinando resultados da web_search e das vagas pré-coletadas acima).`,
+Após a busca, chame return_jobs com 1 a 8 vagas mais relevantes (combinando resultados da web_search e das vagas pré-coletadas acima). Chame return_jobs mesmo que tenha encontrado apenas 1 vaga.`,
         },
       ],
     },
@@ -213,11 +289,17 @@ Após a busca, chame return_jobs com 4 a 8 vagas mais relevantes (combinando res
       .map((b) => b.text)
       .join('\n');
     console.error('[profession] Claude não chamou return_jobs. Resposta:', text.slice(0, 400));
-    throw new Error('Claude não retornou vagas estruturadas');
+    return null;
   }
 
   const result = toolBlock.input as ProfessionSearchResult;
   const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
+
+  if (!rawJobs.length) {
+    console.warn('[profession] Claude chamou return_jobs com array vazio.');
+    return null;
+  }
+
   const aiJobs = rawJobs
     .map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) }))
     .filter((job) => !isBlocked(job.title, blockedKeywords ?? []));
@@ -227,9 +309,8 @@ Após a busca, chame return_jobs com 4 a 8 vagas mais relevantes (combinando res
     const lawQueries = buildLawQueries(positions, specialties);
     const legalSourceJobs = await fetchLegalJobs(lawQueries, preferences, blockedKeywords);
 
-    // Converte para o formato ProfessionJob para incluir no resultado
     const legalProfJobs = legalSourceJobs
-      .filter((j) => !rawJobs.some((ai) => ai.link === j.link)) // evita duplicatas com IA
+      .filter((j) => !rawJobs.some((ai) => ai.link === j.link))
       .map((j) => ({
         title:       j.title,
         company:     j.company,
@@ -240,7 +321,7 @@ Após a busca, chame return_jobs com 4 a 8 vagas mais relevantes (combinando res
         description: j.description,
         salary:      j.salary ?? null,
         link:        resolveJobLink(j.link, j.title, j.company),
-        match:       50, // score neutro — será re-ranqueado pelo cliente se necessário
+        match:       50,
       }));
 
     console.log(`[profession/law] claude: ${aiJobs.length} | fontes especializadas: ${legalProfJobs.length}`);
@@ -260,15 +341,22 @@ export async function findProfessionJobs(
   education: LinkedInEducation[],
   certifications: LinkedInCertification[],
   preferences?: UserPreferences,
-  blockedKeywords?: string[]
+  blockedKeywords?: string[],
+  blockedSources?: string[],
+  likedSources?: string[],
+  careerProfile?: CareerProfile,
 ): Promise<ProfessionSearchResult> {
   try {
-    return await findProfessionJobsClaude(positions, education, certifications, preferences, blockedKeywords);
+    const result = await findProfessionJobsClaude(positions, education, certifications, preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
+    if (result) return result;
+    console.warn('[profession] Claude retornou 0 vagas, switching to Gemini...');
+    return findProfessionJobsGemini(positions, education, certifications, preferences);
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
       console.warn(`[profession] Claude API error (${err.status}), switching to Gemini...`);
       return findProfessionJobsGemini(positions, education, certifications, preferences);
     }
-    throw err;
+    console.error('[profession] Erro inesperado, switching to Gemini:', (err as Error).message);
+    return findProfessionJobsGemini(positions, education, certifications, preferences);
   }
 }

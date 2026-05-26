@@ -47,6 +47,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         link: job.link || null,
         link_status: await verifyLink(job.link || null),
         seen: false,
+        ...(job.published_at ? { published_at: job.published_at } : {}),
       }))
     );
 

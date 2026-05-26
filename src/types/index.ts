@@ -10,6 +10,7 @@ export interface Job {
   description: string;
   salary: string | null;
   link: string | null;
+  published_at?: string | null;
 }
 
 export interface JobRecord extends Job {
@@ -54,6 +55,8 @@ export interface JobSearchRequest {
   preferences?: UserPreferences;
   blockedKeywords?: string[];
   likedKeywords?: string[];
+  blockedSources?: string[];
+  likedSources?: string[];
 }
 
 export interface LinkedInPosition {
@@ -143,5 +146,30 @@ export interface CvRequest {
 
 export interface CvResponse {
   cvId: string;
+  content: string;
+}
+
+// ── Career Profile ─────────────────────────────────────────────────
+
+export type WorkStyle = 'analytical' | 'creative' | 'operational' | 'relational';
+export type TechLiteracy = 'basic' | 'intermediate' | 'advanced';
+export type LeadershipLevel = 'low' | 'medium' | 'high';
+
+export interface CareerProfile {
+  techLiteracy: TechLiteracy;
+  leadershipLevel: LeadershipLevel;
+  workStyle: WorkStyle[];
+  desiredAreas: string[];
+  blockedAreas: string[];
+  hiddenSkills: string[];
+  careerGoals: string;
+  transitionReady: boolean;
+  transitionTarget: string | null;
+  personalitySummary: string;
+  potentialSummary: string;
+}
+
+export interface CareerChatMessage {
+  role: 'user' | 'assistant';
   content: string;
 }

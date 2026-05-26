@@ -10,6 +10,7 @@ interface GupyRawJob {
   state: string | null;
   workplaceType: string; // 'remote' | 'hybrid' | 'on-site'
   company: { name: string };
+  publishedAt?: string | null;
 }
 
 interface GupyResponse {
@@ -67,6 +68,7 @@ export async function searchGupyJobs(
           link: job.jobUrl,
           location: formatGupyLocation(job),
           source: 'Gupy',
+          published_at: job.publishedAt ?? undefined,
         });
       }
     }
