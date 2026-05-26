@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences } from '../types';
+import { searchRemotiveJobs } from './remotive';
+import { searchGupyJobs } from './gupy';
 import { findProfessionJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
 import { isBlocked } from '../utils/inferCategory';
@@ -8,6 +10,19 @@ import { fetchLegalJobs } from './legalJobs';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
+
+// ── Plataformas alvo da busca IA ──────────────────────────────────
+const JOB_PLATFORMS = [
+  'Gupy (gupy.io)', 'Indeed', 'Glassdoor', 'Catho', 'InfoJobs',
+  'Remotive (remotive.com)', 'GeekHunter', 'Programathor', 'Trampos.co', '99jobs',
+  'LinkedIn Jobs (linkedin.com/jobs)',
+  'X/Twitter (#vagastech #vagasTI #hiringBR)',
+  'Facebook (grupos públicos de vagas)',
+  'Instagram (recrutadores e empresas tech)',
+  'site direto da empresa',
+].join(', ');
+
+// ── Profile formatters ────────────────────────────────────────────
 
 function formatPositions(positions: LinkedInPosition[]): string {
   if (!positions.length) return 'Sem experiência';
@@ -23,42 +38,6 @@ function formatEducation(education: LinkedInEducation[]): string {
     `${e.degree ?? 'Curso'}, ${e.school}${e.endDate ? ` ${e.endDate}` : ''}`
   ).join('; ');
 }
-
-const RETURN_JOBS_TOOL: Anthropic.Tool = {
-  name: 'return_jobs',
-  description: 'Retorna as vagas encontradas. Sempre chame esta função ao final com todas as vagas pesquisadas.',
-  input_schema: {
-    type: 'object' as const,
-    required: ['profileSummary', 'jobs'],
-    properties: {
-      profileSummary: {
-        type: 'string',
-        description: 'Resumo do perfil: "Profissão | Nível | Destaque principal"',
-      },
-      jobs: {
-        type: 'array',
-        minItems: 3,
-        maxItems: 6,
-        items: {
-          type: 'object',
-          required: ['title', 'company', 'level', 'remote', 'tags', 'description', 'match', 'link'],
-          properties: {
-            title:       { type: 'string' },
-            company:     { type: 'string' },
-            level:       { type: 'string', enum: ['Junior', 'Pleno', 'Senior'] },
-            remote:      { type: 'boolean' },
-            location:    { type: ['string', 'null'], description: 'Cidade/estado ou "Remoto" ou "Híbrido - Cidade, UF"' },
-            tags:        { type: 'array', items: { type: 'string' } },
-            description: { type: 'string' },
-            salary:      { type: ['string', 'null'] },
-            link:        { type: 'string', description: 'URL da página da vaga encontrada via web_search em plataforma confiável (Gupy, Indeed, Glassdoor, Catho, InfoJobs). Use apenas links reais encontrados na pesquisa — nunca invente. Se não encontrou o link exato, retorne string vazia.' },
-            match:       { type: 'number', minimum: 0, maximum: 100 },
-          },
-        },
-      },
-    },
-  },
-};
 
 function formatCertifications(certifications: LinkedInCertification[]): string {
   if (!certifications.length) return '';
@@ -86,6 +65,88 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
   return lines.length ? '\nPreferências (priorize): ' + lines.join(' · ') : '';
 }
 
+/** Extracts the most recent job title to use as a search query. */
+function extractCurrentTitle(positions: LinkedInPosition[]): string | null {
+  if (!positions.length) return null;
+  const sorted = [...positions].sort((a, b) => {
+    if (!a.finishedOn && b.finishedOn) return -1; // current first
+    if (a.finishedOn && !b.finishedOn) return 1;
+    return 0;
+  });
+  return sorted[0].title;
+}
+
+/** Pre-fetches jobs from Remotive + Gupy using the candidate's current title. */
+async function prefetchDirectJobs(
+  positions: LinkedInPosition[],
+  preferences?: UserPreferences,
+): Promise<string> {
+  const title = extractCurrentTitle(positions);
+  if (!title) return '';
+
+  const queries = [title];
+  const [remotive, gupy] = await Promise.all([
+    searchRemotiveJobs(queries, preferences).catch(() => []),
+    searchGupyJobs(queries, preferences).catch(() => []),
+  ]);
+
+  const jobs = [...remotive, ...gupy];
+  if (!jobs.length) return '';
+
+  const list = jobs
+    .slice(0, 10)
+    .map((j, i) => {
+      const src = j.source ? ` [${j.source}]` : '';
+      return `${i + 1}. "${j.title}" — ${j.company} | ${j.location}${src}\n   Link: ${j.link || 'sem link'}\n   ${j.description.slice(0, 150)}`;
+    })
+    .join('\n\n');
+
+  return `\n\nVAGAS PRÉ-COLETADAS (Remotive + Gupy) — avalie e inclua na lista se forem relevantes para o perfil:\n${list}`;
+}
+
+// ── Tool definition ───────────────────────────────────────────────
+
+const RETURN_JOBS_TOOL: Anthropic.Tool = {
+  name: 'return_jobs',
+  description: 'Retorna as vagas encontradas. Sempre chame esta função ao final com todas as vagas pesquisadas.',
+  input_schema: {
+    type: 'object' as const,
+    required: ['profileSummary', 'jobs'],
+    properties: {
+      profileSummary: {
+        type: 'string',
+        description: 'Resumo do perfil: "Profissão | Nível | Destaque principal"',
+      },
+      jobs: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 8,
+        items: {
+          type: 'object',
+          required: ['title', 'company', 'level', 'remote', 'tags', 'description', 'match', 'link'],
+          properties: {
+            title:       { type: 'string' },
+            company:     { type: 'string' },
+            level:       { type: 'string', enum: ['Junior', 'Pleno', 'Senior'] },
+            remote:      { type: 'boolean' },
+            location:    { type: ['string', 'null'], description: 'Cidade/estado ou "Remoto" ou "Híbrido - Cidade, UF"' },
+            tags:        { type: 'array', items: { type: 'string' } },
+            description: { type: 'string' },
+            salary:      { type: ['string', 'null'] },
+            link: {
+              type: 'string',
+              description: 'URL real da vaga encontrada via web_search ou da lista pré-coletada. Aceita links de job boards, LinkedIn Jobs, X/Twitter, Facebook, Instagram ou site da empresa. Nunca invente — deixe vazio se não encontrou.',
+            },
+            match:       { type: 'number', minimum: 0, maximum: 100 },
+          },
+        },
+      },
+    },
+  },
+};
+
+// ── Claude search ─────────────────────────────────────────────────
+
 async function findProfessionJobsClaude(
   positions: LinkedInPosition[],
   education: LinkedInEducation[],
@@ -111,7 +172,12 @@ async function findProfessionJobsClaude(
 
   const platformNote = lawProfile
     ? 'Jusbrasil Empregos, Conjur, Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia'
-    : 'Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa';
+    : JOB_PLATFORMS;
+
+  // Pre-fetch from free APIs in parallel while building the prompt
+  const directJobsBlock = lawProfile ? '' : await prefetchDirectJobs(positions, preferences);
+
+  const maxAge = preferences?.maxAgeDays ?? 90;
 
   const message = await client.messages.create(
     {
@@ -124,10 +190,12 @@ async function findProfessionJobsClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise 6 vagas reais publicadas nos últimos ${preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo em: ${platformNote}. NÃO use links do LinkedIn. Para cada vaga inclua a URL real no campo link. Chame return_jobs com os resultados.${specialtiesNote}
+          content: `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo em: ${platformNote}. NÃO use links do LinkedIn. Para vagas em redes sociais (X, Facebook, Instagram), priorize o link direto no site da empresa. Inclua a URL real de cada vaga. Chame return_jobs com os resultados.${specialtiesNote}${directJobsBlock}
 
 Experiência: ${formatPositions(positions)}
-Formação: ${formatEducation(education)}${formatCertifications(certifications)}${buildProfessionPrefsBlock(preferences)}`,
+Formação: ${formatEducation(education)}${formatCertifications(certifications)}${buildProfessionPrefsBlock(preferences)}
+
+Após a busca, chame return_jobs com 4 a 8 vagas mais relevantes (combinando resultados da web_search e das vagas pré-coletadas acima).`,
         },
       ],
     },
@@ -184,6 +252,8 @@ Formação: ${formatEducation(education)}${formatCertifications(certifications)}
 
   return { profileSummary: result.profileSummary ?? '', jobs: aiJobs };
 }
+
+// ── Entry point ───────────────────────────────────────────────────
 
 export async function findProfessionJobs(
   positions: LinkedInPosition[],

@@ -1,15 +1,32 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Job, JobSearchRequest, RepoContext, UserPreferences } from '../types';
 import { AdzunaJob, searchAllQueries } from './adzuna';
+import { searchRemotiveJobs } from './remotive';
+import { searchGupyJobs } from './gupy';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
-import { fetchProgramathorJobs } from './programathor';
-import { fetchRemotiveJobs } from './remotive';
 import { isBlocked } from '../utils/inferCategory';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
+
+// ── Source platforms for AI web search ──────────────────────────
+const JOB_PLATFORMS = [
+  // Job boards diretos
+  'Gupy (gupy.io)', 'Indeed', 'Glassdoor', 'Catho', 'InfoJobs',
+  'Remotive (remotive.com)', 'GeekHunter', 'Programathor', 'Trampos.co', '99jobs',
+  // LinkedIn Jobs
+  'LinkedIn Jobs (linkedin.com/jobs)',
+  // Redes sociais (posts públicos)
+  'X/Twitter (#vagastech #vagasTI #hiringBR #devBR)',
+  'Facebook (grupos públicos de vagas tech)',
+  'Instagram (recrutadores tech brasileiros)',
+  // Sites de empresa
+  'site direto da empresa contratante',
+].join(', ');
+
+// ── Helpers ──────────────────────────────────────────────────────
 
 function buildPreferencesSummary(prefs: UserPreferences | undefined): string {
   if (!prefs) return '';
@@ -60,8 +77,24 @@ function buildProfileSummary(profile: JobSearchRequest): string {
   return lines.filter(Boolean).join('\n') + buildPreferencesSummary(profile.preferences);
 }
 
-// --- Adzuna flow: query generation + ranking ---
+// ── Multi-source deduplication ────────────────────────────────────
 
+function mergeRawJobs(...sources: AdzunaJob[][]): AdzunaJob[] {
+  const seen = new Set<string>();
+  const merged: AdzunaJob[] = [];
+  for (const source of sources) {
+    for (const job of source) {
+      const key = job.link || `${job.title.toLowerCase()}|${job.company.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(job);
+      }
+    }
+  }
+  return merged;
+}
+
+// ── Adzuna flow: query generation + ranking ───────────────────────
 
 const RANK_JOBS_TOOL: Anthropic.Tool = {
   name: 'rank_jobs',
@@ -96,7 +129,10 @@ const RANK_JOBS_TOOL: Anthropic.Tool = {
 
 async function rankJobs(profile: JobSearchRequest, rawJobs: AdzunaJob[]): Promise<Job[]> {
   const jobsList = rawJobs
-    .map((j, i) => `[${i + 1}] ${j.title} — ${j.company} | ${j.location}${j.salary ? ` | ${j.salary}` : ''}\n${j.description}`)
+    .map((j, i) => {
+      const src = j.source ? ` [${j.source}]` : '';
+      return `[${i + 1}] ${j.title} — ${j.company} | ${j.location}${j.salary ? ` | ${j.salary}` : ''}${src}\n${j.description}`;
+    })
     .join('\n\n');
 
   const blockedNote = profile.blockedKeywords?.length
@@ -124,7 +160,7 @@ async function rankJobs(profile: JobSearchRequest, rawJobs: AdzunaJob[]): Promis
   const result = toolBlock.input as { jobs: (Job & { index?: number })[] };
   const ranked = Array.isArray(result.jobs) ? result.jobs : [];
 
-  // Restaura os links originais do Adzuna para evitar que a IA modifique as URLs
+  // Restore original links to prevent AI from modifying URLs
   return ranked.map((job) => {
     const originalIndex = typeof job.index === 'number' ? job.index - 1 : -1;
     const original = rawJobs[originalIndex];
@@ -143,7 +179,7 @@ function rankJobsHeuristic(rawJobs: AdzunaJob[]): Job[] {
     const text = `${j.title} ${j.description}`.toLowerCase();
 
     const level: Job['level'] = LEVEL_RE.test(text) ? 'Senior' : JUNIOR_RE.test(text) ? 'Junior' : 'Pleno';
-    const remote = REMOTE_RE.test(text) || j.location.toLowerCase().includes('brasil');
+    const remote = REMOTE_RE.test(text) || j.location.toLowerCase().includes('brasil') || j.source === 'Remotive';
     const skillMatches = text.match(skillRe) ?? [];
     const skills = [...new Set(skillMatches.map((s) => s.charAt(0).toUpperCase() + s.slice(1)))].slice(0, 6);
 
@@ -161,59 +197,7 @@ function rankJobsHeuristic(rawJobs: AdzunaJob[]): Job[] {
   });
 }
 
-// Filtra vagas externas (Programathor/Remotive) por relevância ao perfil e categorias bloqueadas
-function filterRelevant(jobs: AdzunaJob[], profile: JobSearchRequest, queries: string[]): AdzunaJob[] {
-  const keywords = [...profile.skills, ...queries].map((k) => k.toLowerCase());
-  return jobs.filter((j) => {
-    if (isBlocked(j.title, profile.blockedKeywords ?? [])) return false;
-    const text = `${j.title} ${j.description}`.toLowerCase();
-    return keywords.some((kw) => text.includes(kw));
-  });
-}
-
-async function findJobsAdzuna(profile: JobSearchRequest): Promise<Job[]> {
-  const baseQueries = buildSearchQueries(profile);
-  const extraQueries = (profile.likedKeywords ?? []).filter((kw) => !baseQueries.includes(kw));
-  const queries = [...baseQueries, ...extraQueries].slice(0, 6);
-  console.log('[jobs] queries geradas:', queries);
-
-  // Busca nas 3 fontes em paralelo — Programathor e Remotive nunca bloqueiam o fluxo (retornam [] se falharem)
-  const [adzunaJobs, programathorJobs, remotiveJobs] = await Promise.all([
-    searchAllQueries(queries, profile.preferences, profile.blockedKeywords),
-    fetchProgramathorJobs(),
-    fetchRemotiveJobs(profile.skills),
-  ]);
-
-  console.log(`[jobs] adzuna: ${adzunaJobs.length} | programathor: ${programathorJobs.length} | remotive: ${remotiveJobs.length}`);
-
-  // Merge: Adzuna já filtrado; Programathor e Remotive filtrados por relevância
-  const merged = [
-    ...adzunaJobs,
-    ...filterRelevant(programathorJobs, profile, queries),
-    ...filterRelevant(remotiveJobs, profile, queries),
-  ];
-
-  // Deduplica por link
-  const seen = new Set<string>();
-  const unique = merged.filter((j) => {
-    if (seen.has(j.link)) return false;
-    seen.add(j.link);
-    return true;
-  });
-
-  console.log(`[jobs] total após merge + dedup: ${unique.length}`);
-
-  if (unique.length < 3) throw new Error('Fontes retornaram vagas insuficientes');
-
-  try {
-    return await rankJobs(profile, unique);
-  } catch (err) {
-    console.warn('[jobs] ranking por IA falhou, usando ranking heurístico:', (err as Error).message);
-    return rankJobsHeuristic(unique);
-  }
-}
-
-// --- Fallback: web search (old behavior) ---
+// ── Fallback: AI web search ───────────────────────────────────────
 
 const RETURN_JOBS_TOOL: Anthropic.Tool = {
   name: 'return_jobs',
@@ -240,7 +224,7 @@ const RETURN_JOBS_TOOL: Anthropic.Tool = {
             salary:      { type: ['string', 'null'] },
             link: {
               type: 'string',
-              description: 'URL da página da vaga em plataforma confiável (Gupy, Indeed, Glassdoor, Catho, InfoJobs). Use apenas se encontrou o link real via web_search — nunca invente. Se não encontrou, retorne string vazia.',
+              description: 'URL real da página da vaga encontrada via web_search. Aceita links de job boards, LinkedIn Jobs, sites de empresa, X/Twitter, Facebook ou Instagram. Nunca invente — deixe vazio se não encontrou.',
             },
           },
         },
@@ -253,6 +237,7 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
   const blockedNote = profile.blockedKeywords?.length
     ? ` NÃO inclua vagas das categorias: ${profile.blockedKeywords.join(', ')}.`
     : '';
+  const maxAge = profile.preferences?.maxAgeDays ?? 90;
 
   const message = await client.messages.create(
     {
@@ -264,7 +249,7 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
       tool_choice: { type: 'any' },
       messages: [{
         role: 'user',
-        content: `Pesquise 6 vagas reais nos últimos ${profile.preferences?.maxAgeDays ?? 90} dias compatíveis com o perfil abaixo no Glassdoor, Catho, InfoJobs, Gupy, Indeed ou site direto da empresa. NÃO use links do LinkedIn. Chame return_jobs com os resultados.\n\nPERFIL:\n${buildProfileSummary(profile)}`,
+        content: `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias compatíveis com o perfil abaixo nos seguintes canais: ${JOB_PLATFORMS}. Para vagas encontradas em redes sociais (X/Twitter, Facebook, Instagram), inclua o link direto para candidatura no site da empresa quando disponível. Chame return_jobs com os resultados.\n\nPERFIL:\n${buildProfileSummary(profile)}`,
       }],
     },
     { headers: { 'anthropic-beta': WEB_SEARCH_BETA } }
@@ -281,17 +266,48 @@ async function findJobsWebSearch(profile: JobSearchRequest): Promise<Job[]> {
   return jobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) }));
 }
 
-// --- Entry point ---
+// ── Entry point ───────────────────────────────────────────────────
 
 export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
+  // Build queries from profile skills/repos
+  const baseQueries = buildSearchQueries(profile);
+  const extraQueries = (profile.likedKeywords ?? []).filter((kw) => !baseQueries.includes(kw));
+  const queries = [...baseQueries, ...extraQueries].slice(0, 6);
+  console.log('[jobs] queries geradas:', queries);
+
+  // Fetch from all direct API sources in parallel (Adzuna requires keys; Remotive + Gupy are always free)
+  const directSources: Promise<AdzunaJob[]>[] = [
+    searchRemotiveJobs(queries, profile.preferences).catch((e) => { console.warn('[remotive] erro:', e.message); return []; }),
+    searchGupyJobs(queries, profile.preferences).catch((e) => { console.warn('[gupy] erro:', e.message); return []; }),
+  ];
+
   if (process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY) {
+    directSources.push(
+      searchAllQueries(queries, profile.preferences, profile.blockedKeywords)
+        .catch((e) => { console.warn('[adzuna] erro:', e.message); return []; })
+    );
+  }
+
+  const sourceResults = await Promise.all(directSources);
+  const rawJobs = mergeRawJobs(...sourceResults);
+
+  const counts = sourceResults.map((r, i) => {
+    const names = ['Remotive', 'Gupy', 'Adzuna'];
+    return `${names[i] ?? `fonte${i}`}=${r.length}`;
+  });
+  console.log(`[jobs] fontes diretas: ${counts.join(', ')} → ${rawJobs.length} total`);
+
+  if (rawJobs.length >= 3) {
     try {
-      return await findJobsAdzuna(profile);
+      return await rankJobs(profile, rawJobs);
     } catch (err) {
-      console.warn('[jobs] Adzuna flow falhou, usando web search como fallback:', (err as Error).message);
+      console.warn('[jobs] ranking por IA falhou, usando ranking heurístico:', (err as Error).message);
+      return rankJobsHeuristic(rawJobs);
     }
   }
 
+  // Not enough direct results — fall through to AI web search
+  console.warn('[jobs] fontes diretas insuficientes, usando web search como fallback');
   try {
     return await findJobsWebSearch(profile);
   } catch (err) {

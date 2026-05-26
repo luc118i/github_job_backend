@@ -24,6 +24,7 @@ export interface AdzunaJob {
   link: string;
   location: string;
   salary?: string;
+  source?: string;
 }
 
 function formatSalary(min?: number, max?: number): string | undefined {
@@ -69,6 +70,7 @@ export async function fetchAdzunaJobs(
     link: `https://www.adzuna.com.br/details/${job.id}`,
     location: job.location.display_name,
     salary: formatSalary(job.salary_min, job.salary_max),
+    source: 'Adzuna',
   }));
 }
 

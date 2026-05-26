@@ -1,33 +1,48 @@
 import { LinkStatus } from '../types';
 
 const TRUSTED_DOMAINS = new Set([
-  'linkedin.com',
-  'glassdoor.com',
-  'glassdoor.com.br',
-  'indeed.com',
+  // Job boards nacionais
   'gupy.io',
-  'vagas.com.br',
-  'infojobs.com.br',
   'catho.com.br',
+  'infojobs.com.br',
+  'vagas.com.br',
   'trampos.co',
   'programathor.com.br',
-  'wellfound.com',
-  'lever.co',
-  'greenhouse.io',
-  'workable.com',
-  'remote.com',
-  'stackoverflow.com',
-  'remotar.com.br',
-  'kenoby.com',
+  'geekhunter.com.br',
+  '99jobs.com',
   'bne.com.br',
   'empregos.com.br',
   'nerdin.com.br',
   'hipsters.jobs',
+  'remotar.com.br',
+  'kenoby.com',
+  // Job boards internacionais
+  'indeed.com',
+  'glassdoor.com',
+  'glassdoor.com.br',
+  'linkedin.com',
+  'wellfound.com',
+  'remotive.com',
+  'remote.com',
+  'stackoverflow.com',
   'adzuna.com',
   'adzuna.com.br',
   // Plataformas jurídicas brasileiras
   'jusbrasil.com.br',
   'conjur.com.br',
+  // ATS / sistemas de candidatura
+  'lever.co',
+  'greenhouse.io',
+  'workable.com',
+  'recruitee.com',
+  'bamboohr.com',
+  'smartrecruiters.com',
+  'ashbyhq.com',
+  // Redes sociais (posts públicos de vagas)
+  'twitter.com',
+  'x.com',
+  'facebook.com',
+  'instagram.com',
 ]);
 
 const SEARCH_RESULT_PATTERNS = [
