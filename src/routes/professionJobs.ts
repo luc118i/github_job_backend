@@ -1,12 +1,13 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { findProfessionJobs, findJobsByQuery } from '../services/genericJobFinder';
 import { verifyLink } from '../services/linkVerifier';
 import { supabase } from '../services/supabase';
 import { CareerProfile, LinkedInData, UserPreferences } from '../types';
+import { optionalAuth, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   const { linkedIn, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, query } = req.body as {
     linkedIn?: LinkedInData;
     preferences?: UserPreferences;
@@ -44,7 +45,7 @@ router.post('/', async (req: Request, res: Response) => {
 
       const { data: search, error: searchError } = await supabase
         .from('searches')
-        .insert({ github_username: null, skills })
+        .insert({ github_username: null, skills, user_id: req.userId ?? null })
         .select()
         .single();
 
@@ -109,7 +110,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const { data: search, error: searchError } = await supabase
       .from('searches')
-      .insert({ github_username: null, skills })
+      .insert({ github_username: null, skills, user_id: req.userId ?? null })
       .select()
       .single();
 
