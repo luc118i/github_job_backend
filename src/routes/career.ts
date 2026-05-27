@@ -6,6 +6,13 @@ import { supabase } from '../services/supabase';
 
 const router = Router();
 
+// Options marker format: [op: Option A | Option B | Option C]
+// Backend strips it from the message and returns options[] separately.
+const OPTIONS_INSTRUCTION = `
+Ao final de cada pergunta, quando houver respostas previsíveis, adicione opções no formato exato abaixo — sem texto depois do marcador:
+[op: Opcao 1 | Opcao 2 | Opcao 3]
+Use 2 a 4 opcoes curtas (máximo 4 palavras cada). Não use este marcador em mensagens que não sejam perguntas.`;
+
 const SYSTEM_PROMPT = `Você é um consultor de carreira especialista em desenvolvimento humano e transição profissional. Seu objetivo é entender o potencial real do usuário além do currículo.
 
 Conduza uma conversa breve, empática e direta em português. Faça UMA pergunta por vez. Respostas curtas, máximo 2 frases. Sem listas, sem marcadores, sem formatação markdown.
@@ -25,7 +32,18 @@ Siga esta sequência de temas (adapte com base nas respostas, mas cubra todos):
 6. Experiências de liderança, mesmo informais
 7. Nível de conforto com tecnologia e ferramentas digitais
 
-Após cobrir os 7 temas (geralmente 7 a 10 trocas), chame analyze_profile para estruturar o perfil. Não avise que vai chamar a função — apenas chame.`;
+Após cobrir os 7 temas (geralmente 7 a 10 trocas), chame analyze_profile para estruturar o perfil. Não avise que vai chamar a função — apenas chame.${OPTIONS_INSTRUCTION}`;
+
+// Strips [op: X | Y | Z] from the message and returns the options list
+const OPTIONS_REGEX = /\[op:\s*([^\]]+)\]\s*$/;
+
+function parseOptions(raw: string): { message: string; options: string[] } {
+  const match = raw.match(OPTIONS_REGEX);
+  if (!match) return { message: raw.trim(), options: [] };
+  const options = match[1].split('|').map((s) => s.trim()).filter(Boolean);
+  const message = raw.replace(OPTIONS_REGEX, '').trim();
+  return { message, options };
+}
 
 // ── Helpers for /refine ───────────────────────────────────────────
 
@@ -75,7 +93,7 @@ Regras:
 - Uma mensagem por vez, máximo 2 frases
 - Sem markdown, sem listas, sem formatação
 - Preserve todos os campos do perfil original que não foram discutidos
-- Chame analyze_profile ao final com o perfil completo e atualizado`;
+- Chame analyze_profile ao final com o perfil completo e atualizado${OPTIONS_INSTRUCTION}`;
 }
 
 // POST /career/message
@@ -95,7 +113,8 @@ router.post('/message', async (req: AuthRequest, res: Response) => {
       res.json({ profile: result.profile, done: true });
       return;
     }
-    res.json({ message: result.message ?? '', done: false });
+    const { message, options } = parseOptions(result.message ?? '');
+    res.json({ message, ...(options.length ? { options } : {}), done: false });
   } catch (err) {
     console.error('[career] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
@@ -128,7 +147,8 @@ router.post('/refine', async (req: AuthRequest, res: Response) => {
       res.json({ profile: result.profile, done: true });
       return;
     }
-    res.json({ message: result.message ?? '', done: false });
+    const { message, options } = parseOptions(result.message ?? '');
+    res.json({ message, ...(options.length ? { options } : {}), done: false });
   } catch (err) {
     console.error('[career/refine] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
