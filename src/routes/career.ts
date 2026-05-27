@@ -9,9 +9,13 @@ const router = Router();
 // Options marker format: [op: Option A | Option B | Option C]
 // Backend strips it from the message and returns options[] separately.
 const OPTIONS_INSTRUCTION = `
-Ao final de cada pergunta, quando houver respostas previsíveis, adicione opções no formato exato abaixo — sem texto depois do marcador:
-[op: Opcao 1 | Opcao 2 | Opcao 3]
-Use 2 a 4 opcoes curtas (máximo 4 palavras cada). Não use este marcador em mensagens que não sejam perguntas.`;
+Ao final de cada pergunta, adicione opções que respondam diretamente àquela pergunta específica — nunca opções genéricas como "Sim", "Não" ou "Talvez". As opções devem ser respostas prontas e naturais que o usuário poderia dar. Use o formato exato abaixo, sem texto depois do marcador:
+[op: Resposta concreta 1 | Resposta concreta 2 | Resposta concreta 3]
+Exemplos corretos:
+- Para "Está satisfeito na área atual?" → [op: Estou satisfeito | Quero explorar outras áreas | Satisfeito, mas aberto a mudanças]
+- Para "Qual estilo de trabalho?" → [op: Analítico | Criativo | Operacional | Relacional]
+- Para "Como é sua experiência com liderança?" → [op: Nunca liderei | Liderei times pequenos | Tenho bastante experiência]
+Use 2 a 4 opcoes, máximo 5 palavras cada. Não use este marcador em mensagens que não sejam perguntas.`;
 
 const SYSTEM_PROMPT = `Você é um consultor de carreira especialista em desenvolvimento humano e transição profissional. Seu objetivo é entender o potencial real do usuário além do currículo.
 
