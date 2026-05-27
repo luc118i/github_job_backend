@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import { CareerChatMessage, CareerProfile } from '../types';
+import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
 
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -128,6 +128,107 @@ router.post('/message', async (req: Request, res: Response) => {
     res.json({ message: textBlock?.text ?? '', done: false });
   } catch (err) {
     console.error('[career] erro:', err);
+    res.status(500).json({ error: 'Erro ao processar mensagem' });
+  }
+});
+
+// ── Helpers for /refine ───────────────────────────────────────────
+
+const WORK_STYLE_PT: Record<string, string> = {
+  analytical: 'analítico', creative: 'criativo',
+  operational: 'operacional', relational: 'relacional',
+};
+const TECH_PT: Record<string, string> = { basic: 'básico', intermediate: 'intermediário', advanced: 'avançado' };
+const LEADERSHIP_PT: Record<string, string> = { low: 'baixa', medium: 'moderada', high: 'alta' };
+
+function buildRefineSystemPrompt(profile: CareerProfile, linkedIn?: LinkedInData): string {
+  const lines = [
+    `Objetivo: ${profile.careerGoals}`,
+    `Perfil comportamental: ${profile.personalitySummary}`,
+    `Estilo de trabalho: ${profile.workStyle.map((s) => WORK_STYLE_PT[s] ?? s).join(', ')}`,
+    `Liderança: ${LEADERSHIP_PT[profile.leadershipLevel] ?? profile.leadershipLevel}`,
+    `Tecnologia: ${TECH_PT[profile.techLiteracy] ?? profile.techLiteracy}`,
+    profile.desiredAreas.length ? `Quer explorar: ${profile.desiredAreas.join(', ')}` : 'Nenhuma área de interesse registrada',
+    profile.blockedAreas.length ? `Não quer mais: ${profile.blockedAreas.join(', ')}` : null,
+    profile.hiddenSkills.length ? `Habilidades ocultas: ${profile.hiddenSkills.join(', ')}` : null,
+    profile.transitionReady && profile.transitionTarget
+      ? `Em transição para: ${profile.transitionTarget}`
+      : 'Não está em transição de carreira',
+    profile.potentialSummary ? `Potencial identificado: ${profile.potentialSummary}` : null,
+  ].filter(Boolean).join('\n');
+
+  const liContext = linkedIn?.positions?.length
+    ? '\n\nHistórico profissional (LinkedIn):\n' +
+      linkedIn.positions.slice(0, 3)
+        .map((p) => `- ${p.title} na ${p.company}${p.finishedOn ? '' : ' (atual)'}`)
+        .join('\n')
+    : '';
+
+  return `Você é um consultor de carreira. O usuário já completou uma análise inicial e você tem o perfil estruturado abaixo. Sua missão agora é refinar esse perfil através de uma conversa.
+
+PERFIL ATUAL:
+${lines}${liContext}
+
+Seu papel nesta sessão:
+1. Abrir com uma leitura rápida do perfil: o que se destaca e o que parece vago ou incompleto
+2. Fazer perguntas específicas para refinar pontos ambíguos ou descobrir aspectos novos
+3. Dar feedback concreto: "com esse perfil, você tende a se encaixar bem em X porque Y"
+4. Sugerir tipos de vaga ou áreas que combinam com o perfil atual
+5. Chamar analyze_profile quando tiver novas informações para atualizar 2+ campos OU quando o usuário sinalizar que terminou
+
+Regras:
+- Uma mensagem por vez, máximo 2 frases
+- Sem markdown, sem listas, sem formatação
+- Preserve todos os campos do perfil original que não foram discutidos
+- Chame analyze_profile ao final com o perfil completo e atualizado`;
+}
+
+// POST /career/refine
+// Body: { profile: CareerProfile, messages: CareerChatMessage[], linkedIn?: LinkedInData }
+// Returns: { message?: string, profile?: CareerProfile, done: boolean }
+router.post('/refine', async (req: Request, res: Response) => {
+  const { profile, messages = [], linkedIn } = req.body as {
+    profile: CareerProfile;
+    messages: CareerChatMessage[];
+    linkedIn?: LinkedInData;
+  };
+
+  if (!profile) {
+    res.status(400).json({ error: 'profile obrigatório' });
+    return;
+  }
+
+  // If no messages yet, send a silent trigger so the AI opens the conversation
+  const apiMessages = messages.length > 0
+    ? messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    : [{ role: 'user' as const, content: 'pode iniciar a análise do meu perfil' }];
+
+  try {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 512,
+      system: buildRefineSystemPrompt(profile, linkedIn),
+      tools: [ANALYZE_TOOL],
+      tool_choice: { type: 'auto' },
+      messages: apiMessages,
+    });
+
+    const textBlock = response.content.find(
+      (b): b is Anthropic.TextBlock => b.type === 'text',
+    );
+    const toolBlock = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'analyze_profile',
+    );
+
+    if (toolBlock) {
+      const updated = toolBlock.input as CareerProfile;
+      res.json({ profile: updated, done: true });
+      return;
+    }
+
+    res.json({ message: textBlock?.text ?? '', done: false });
+  } catch (err) {
+    console.error('[career/refine] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
   }
 });

@@ -6,7 +6,6 @@ import { searchGupyJobs } from './gupy';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
-import { isBlocked } from '../utils/inferCategory';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
