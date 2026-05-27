@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
-import { sendCareerMessageGemini } from '../services/gemini';
+import { sendCareerMessageGroq } from '../services/groq';
 
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -92,8 +92,8 @@ const ANALYZE_TOOL: Anthropic.Tool = {
   },
 };
 
-// Returns true for credit/billing errors and quota errors — use Gemini fallback
-function shouldFallbackToGemini(err: unknown): boolean {
+// Returns true for credit/billing errors and quota errors — use Groq fallback
+function shouldFallback(err: unknown): boolean {
   if (!(err instanceof Anthropic.APIError)) return false;
   const msg = (err.message ?? '').toLowerCase();
   return (
@@ -139,18 +139,18 @@ router.post('/message', async (req: Request, res: Response) => {
 
     res.json({ message: textBlock?.text ?? '', done: false });
   } catch (err) {
-    if (shouldFallbackToGemini(err)) {
-      console.warn('[career] Claude indisponível, usando Gemini como fallback...');
+    if (shouldFallback(err)) {
+      console.warn('[career] Claude indisponível, usando Groq como fallback...');
       try {
-        const geminiResponse = await sendCareerMessageGemini(messages, SYSTEM_PROMPT);
-        if (geminiResponse.done && geminiResponse.profile) {
-          res.json({ profile: geminiResponse.profile, done: true });
+        const groqResponse = await sendCareerMessageGroq(messages, SYSTEM_PROMPT);
+        if (groqResponse.done && groqResponse.profile) {
+          res.json({ profile: groqResponse.profile, done: true });
           return;
         }
-        res.json({ message: geminiResponse.message ?? '', done: false });
+        res.json({ message: groqResponse.message ?? '', done: false });
         return;
-      } catch (geminiErr) {
-        console.error('[career] Gemini fallback também falhou:', geminiErr);
+      } catch (groqErr) {
+        console.error('[career] Groq fallback também falhou:', groqErr);
       }
     }
     console.error('[career] erro:', err);
@@ -254,23 +254,23 @@ router.post('/refine', async (req: Request, res: Response) => {
 
     res.json({ message: textBlock?.text ?? '', done: false });
   } catch (err) {
-    if (shouldFallbackToGemini(err)) {
-      console.warn('[career/refine] Claude indisponível, usando Gemini como fallback...');
+    if (shouldFallback(err)) {
+      console.warn('[career/refine] Claude indisponível, usando Groq como fallback...');
       const systemPrompt = buildRefineSystemPrompt(profile, linkedIn);
       // Use same messages that would have gone to Claude (with trigger if empty)
-      const geminiMessages: CareerChatMessage[] = messages.length > 0
+      const groqMessages: CareerChatMessage[] = messages.length > 0
         ? messages
         : [{ role: 'user', content: 'pode iniciar a análise do meu perfil' }];
       try {
-        const geminiResponse = await sendCareerMessageGemini(geminiMessages, systemPrompt);
-        if (geminiResponse.done && geminiResponse.profile) {
-          res.json({ profile: geminiResponse.profile, done: true });
+        const groqResponse = await sendCareerMessageGroq(groqMessages, systemPrompt);
+        if (groqResponse.done && groqResponse.profile) {
+          res.json({ profile: groqResponse.profile, done: true });
           return;
         }
-        res.json({ message: geminiResponse.message ?? '', done: false });
+        res.json({ message: groqResponse.message ?? '', done: false });
         return;
-      } catch (geminiErr) {
-        console.error('[career/refine] Gemini fallback também falhou:', geminiErr);
+      } catch (groqErr) {
+        console.error('[career/refine] Groq fallback também falhou:', groqErr);
       }
     }
     console.error('[career/refine] erro:', err);
