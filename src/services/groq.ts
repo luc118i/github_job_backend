@@ -4,9 +4,9 @@ import { CareerChatMessage, CareerProfile } from '../types';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const GROQ_MODELS = [
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
   'llama-3.3-70b-versatile',
+  'llama-3.1-70b-versatile',
+  'llama3-70b-8192',
 ];
 
 // OpenAI-style tool definition (Groq uses OpenAI API format)
@@ -123,7 +123,7 @@ export async function sendCareerMessageGroq(
       const msg = (err as Error).message ?? '';
       const status = (err as { status?: number }).status;
       const code = (err as { error?: { error?: { code?: string } } }).error?.error?.code ?? '';
-      const retryable = status === 429 || status === 503 || code === 'model_decommissioned' || msg.includes('vazia') || msg.includes('JSON');
+      const retryable = status === 429 || status === 503 || status === 404 || code === 'model_decommissioned' || code === 'model_not_found' || msg.includes('vazia') || msg.includes('JSON');
       if (retryable) {
         console.warn(`[career/groq] ${model} falhou (${msg}), tentando próximo...`);
         lastErr = err;
