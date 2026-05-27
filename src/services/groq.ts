@@ -3,10 +3,9 @@ import { CareerChatMessage, CareerProfile } from '../types';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Models ordered by capability — tool-use-specific first, versatile as fallback
 const GROQ_MODELS = [
-  'llama3-groq-70b-8192-tool-use-preview',
-  'llama3-groq-8b-8192-tool-use-preview',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
   'llama-3.3-70b-versatile',
 ];
 
@@ -123,7 +122,8 @@ export async function sendCareerMessageGroq(
     } catch (err) {
       const msg = (err as Error).message ?? '';
       const status = (err as { status?: number }).status;
-      const retryable = status === 429 || status === 503 || msg.includes('vazia') || msg.includes('JSON');
+      const code = (err as { error?: { error?: { code?: string } } }).error?.error?.code ?? '';
+      const retryable = status === 429 || status === 503 || code === 'model_decommissioned' || msg.includes('vazia') || msg.includes('JSON');
       if (retryable) {
         console.warn(`[career/groq] ${model} falhou (${msg}), tentando próximo...`);
         lastErr = err;
