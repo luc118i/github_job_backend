@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
+import { Router, Response } from 'express';
 import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
 import { sendCareerMessageGroq } from '../services/groq';
+import { requireAuth, AuthRequest } from '../middleware/auth';
+import { supabase } from '../services/supabase';
 
 const router = Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `Você é um consultor de carreira especialista em desenvolvimento humano e transição profissional. Seu objetivo é entender o potencial real do usuário além do currículo.
 
@@ -26,137 +26,6 @@ Siga esta sequência de temas (adapte com base nas respostas, mas cubra todos):
 7. Nível de conforto com tecnologia e ferramentas digitais
 
 Após cobrir os 7 temas (geralmente 7 a 10 trocas), chame analyze_profile para estruturar o perfil. Não avise que vai chamar a função — apenas chame.`;
-
-const ANALYZE_TOOL: Anthropic.Tool = {
-  name: 'analyze_profile',
-  description: 'Estrutura o perfil de carreira com base em toda a conversa.',
-  input_schema: {
-    type: 'object' as const,
-    required: [
-      'techLiteracy', 'leadershipLevel', 'workStyle',
-      'desiredAreas', 'blockedAreas', 'hiddenSkills',
-      'careerGoals', 'transitionReady', 'personalitySummary', 'potentialSummary',
-    ],
-    properties: {
-      techLiteracy: {
-        type: 'string',
-        enum: ['basic', 'intermediate', 'advanced'],
-        description: 'Nível de conforto com tecnologia e ferramentas digitais',
-      },
-      leadershipLevel: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        description: 'Capacidade e experiência de liderança',
-      },
-      workStyle: {
-        type: 'array',
-        items: { type: 'string', enum: ['analytical', 'creative', 'operational', 'relational'] },
-        description: 'Perfil de trabalho predominante (pode ter mais de um)',
-      },
-      desiredAreas: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Áreas, funções ou setores que o usuário quer explorar',
-      },
-      blockedAreas: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Áreas, funções ou setores que o usuário não quer mais',
-      },
-      hiddenSkills: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Habilidades reais não evidentes no currículo atual',
-      },
-      careerGoals: {
-        type: 'string',
-        description: 'Objetivo de carreira em 1 frase direta',
-      },
-      transitionReady: {
-        type: 'boolean',
-        description: 'Se o usuário está disposto a mudar de área profissional',
-      },
-      transitionTarget: {
-        type: ['string', 'null'],
-        description: 'Área alvo da transição, se aplicável',
-      },
-      personalitySummary: {
-        type: 'string',
-        description: 'Resumo do perfil comportamental em 1 frase objetiva',
-      },
-      potentialSummary: {
-        type: 'string',
-        description: 'Principal potencial não explorado identificado, em 1 frase',
-      },
-    },
-  },
-};
-
-// Returns true for credit/billing errors and quota errors — use Groq fallback
-function shouldFallback(err: unknown): boolean {
-  if (!(err instanceof Anthropic.APIError)) return false;
-  const msg = (err.message ?? '').toLowerCase();
-  return (
-    err.status === 400 && (msg.includes('credit') || msg.includes('balance') || msg.includes('billing')) ||
-    err.status === 429 ||
-    err.status === 503
-  );
-}
-
-// POST /career/message
-// Body: { messages: CareerChatMessage[] }
-// Returns: { message?: string, profile?: CareerProfile, done: boolean }
-router.post('/message', async (req: Request, res: Response) => {
-  const { messages } = req.body as { messages: CareerChatMessage[] };
-
-  if (!Array.isArray(messages)) {
-    res.status(400).json({ error: 'messages inválido' });
-    return;
-  }
-
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 512,
-      system: SYSTEM_PROMPT,
-      tools: [ANALYZE_TOOL],
-      tool_choice: { type: 'auto' },
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    });
-
-    const textBlock = response.content.find(
-      (b): b is Anthropic.TextBlock => b.type === 'text',
-    );
-    const toolBlock = response.content.find(
-      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'analyze_profile',
-    );
-
-    if (toolBlock) {
-      const profile = toolBlock.input as CareerProfile;
-      res.json({ profile, done: true });
-      return;
-    }
-
-    res.json({ message: textBlock?.text ?? '', done: false });
-  } catch (err) {
-    if (shouldFallback(err)) {
-      console.warn('[career] Claude indisponível, usando Groq como fallback...');
-      try {
-        const groqResponse = await sendCareerMessageGroq(messages, SYSTEM_PROMPT);
-        if (groqResponse.done && groqResponse.profile) {
-          res.json({ profile: groqResponse.profile, done: true });
-          return;
-        }
-        res.json({ message: groqResponse.message ?? '', done: false });
-        return;
-      } catch (groqErr) {
-        console.error('[career] Groq fallback também falhou:', groqErr);
-      }
-    }
-    console.error('[career] erro:', err);
-    res.status(500).json({ error: 'Erro ao processar mensagem' });
-  }
-});
 
 // ── Helpers for /refine ───────────────────────────────────────────
 
@@ -209,10 +78,34 @@ Regras:
 - Chame analyze_profile ao final com o perfil completo e atualizado`;
 }
 
+// POST /career/message
+// Body: { messages: CareerChatMessage[] }
+// Returns: { message?: string, profile?: CareerProfile, done: boolean }
+router.post('/message', async (req: AuthRequest, res: Response) => {
+  const { messages } = req.body as { messages: CareerChatMessage[] };
+
+  if (!Array.isArray(messages)) {
+    res.status(400).json({ error: 'messages inválido' });
+    return;
+  }
+
+  try {
+    const result = await sendCareerMessageGroq(messages, SYSTEM_PROMPT);
+    if (result.done && result.profile) {
+      res.json({ profile: result.profile, done: true });
+      return;
+    }
+    res.json({ message: result.message ?? '', done: false });
+  } catch (err) {
+    console.error('[career] erro:', err);
+    res.status(500).json({ error: 'Erro ao processar mensagem' });
+  }
+});
+
 // POST /career/refine
 // Body: { profile: CareerProfile, messages: CareerChatMessage[], linkedIn?: LinkedInData }
 // Returns: { message?: string, profile?: CareerProfile, done: boolean }
-router.post('/refine', async (req: Request, res: Response) => {
+router.post('/refine', async (req: AuthRequest, res: Response) => {
   const { profile, messages = [], linkedIn } = req.body as {
     profile: CareerProfile;
     messages: CareerChatMessage[];
@@ -225,57 +118,55 @@ router.post('/refine', async (req: Request, res: Response) => {
   }
 
   // If no messages yet, send a silent trigger so the AI opens the conversation
-  const apiMessages = messages.length > 0
-    ? messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-    : [{ role: 'user' as const, content: 'pode iniciar a análise do meu perfil' }];
+  const groqMessages: CareerChatMessage[] = messages.length > 0
+    ? messages
+    : [{ role: 'user', content: 'pode iniciar a análise do meu perfil' }];
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 512,
-      system: buildRefineSystemPrompt(profile, linkedIn),
-      tools: [ANALYZE_TOOL],
-      tool_choice: { type: 'auto' },
-      messages: apiMessages,
-    });
-
-    const textBlock = response.content.find(
-      (b): b is Anthropic.TextBlock => b.type === 'text',
-    );
-    const toolBlock = response.content.find(
-      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'analyze_profile',
-    );
-
-    if (toolBlock) {
-      const updated = toolBlock.input as CareerProfile;
-      res.json({ profile: updated, done: true });
+    const result = await sendCareerMessageGroq(groqMessages, buildRefineSystemPrompt(profile, linkedIn));
+    if (result.done && result.profile) {
+      res.json({ profile: result.profile, done: true });
       return;
     }
-
-    res.json({ message: textBlock?.text ?? '', done: false });
+    res.json({ message: result.message ?? '', done: false });
   } catch (err) {
-    if (shouldFallback(err)) {
-      console.warn('[career/refine] Claude indisponível, usando Groq como fallback...');
-      const systemPrompt = buildRefineSystemPrompt(profile, linkedIn);
-      // Use same messages that would have gone to Claude (with trigger if empty)
-      const groqMessages: CareerChatMessage[] = messages.length > 0
-        ? messages
-        : [{ role: 'user', content: 'pode iniciar a análise do meu perfil' }];
-      try {
-        const groqResponse = await sendCareerMessageGroq(groqMessages, systemPrompt);
-        if (groqResponse.done && groqResponse.profile) {
-          res.json({ profile: groqResponse.profile, done: true });
-          return;
-        }
-        res.json({ message: groqResponse.message ?? '', done: false });
-        return;
-      } catch (groqErr) {
-        console.error('[career/refine] Groq fallback também falhou:', groqErr);
-      }
-    }
     console.error('[career/refine] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
   }
+});
+
+// GET /career/profile — retorna o perfil salvo do usuário autenticado
+router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('career_profile')
+    .eq('id', req.userId!)
+    .maybeSingle();
+
+  if (error) {
+    res.status(500).json({ error: 'Erro ao buscar perfil' });
+    return;
+  }
+
+  res.json({ profile: (data as { career_profile?: CareerProfile | null })?.career_profile ?? null });
+});
+
+// PUT /career/profile — salva ou atualiza o perfil do usuário autenticado
+router.put('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { profile } = req.body as { profile: CareerProfile | null };
+
+  const { error } = await supabase
+    .from('users')
+    .update({ career_profile: profile ?? null })
+    .eq('id', req.userId!);
+
+  if (error) {
+    console.error('[career/profile] erro ao salvar:', error);
+    res.status(500).json({ error: 'Erro ao salvar perfil' });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 export default router;
