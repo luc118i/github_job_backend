@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
+import { sendCareerMessageGemini } from '../services/gemini';
 
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -91,6 +92,17 @@ const ANALYZE_TOOL: Anthropic.Tool = {
   },
 };
 
+// Returns true for credit/billing errors and quota errors — use Gemini fallback
+function shouldFallbackToGemini(err: unknown): boolean {
+  if (!(err instanceof Anthropic.APIError)) return false;
+  const msg = (err.message ?? '').toLowerCase();
+  return (
+    err.status === 400 && (msg.includes('credit') || msg.includes('balance') || msg.includes('billing')) ||
+    err.status === 429 ||
+    err.status === 503
+  );
+}
+
 // POST /career/message
 // Body: { messages: CareerChatMessage[] }
 // Returns: { message?: string, profile?: CareerProfile, done: boolean }
@@ -127,6 +139,20 @@ router.post('/message', async (req: Request, res: Response) => {
 
     res.json({ message: textBlock?.text ?? '', done: false });
   } catch (err) {
+    if (shouldFallbackToGemini(err)) {
+      console.warn('[career] Claude indisponível, usando Gemini como fallback...');
+      try {
+        const geminiResponse = await sendCareerMessageGemini(messages, SYSTEM_PROMPT);
+        if (geminiResponse.done && geminiResponse.profile) {
+          res.json({ profile: geminiResponse.profile, done: true });
+          return;
+        }
+        res.json({ message: geminiResponse.message ?? '', done: false });
+        return;
+      } catch (geminiErr) {
+        console.error('[career] Gemini fallback também falhou:', geminiErr);
+      }
+    }
     console.error('[career] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
   }
@@ -228,6 +254,25 @@ router.post('/refine', async (req: Request, res: Response) => {
 
     res.json({ message: textBlock?.text ?? '', done: false });
   } catch (err) {
+    if (shouldFallbackToGemini(err)) {
+      console.warn('[career/refine] Claude indisponível, usando Gemini como fallback...');
+      const systemPrompt = buildRefineSystemPrompt(profile, linkedIn);
+      // Use same messages that would have gone to Claude (with trigger if empty)
+      const geminiMessages: CareerChatMessage[] = messages.length > 0
+        ? messages
+        : [{ role: 'user', content: 'pode iniciar a análise do meu perfil' }];
+      try {
+        const geminiResponse = await sendCareerMessageGemini(geminiMessages, systemPrompt);
+        if (geminiResponse.done && geminiResponse.profile) {
+          res.json({ profile: geminiResponse.profile, done: true });
+          return;
+        }
+        res.json({ message: geminiResponse.message ?? '', done: false });
+        return;
+      } catch (geminiErr) {
+        console.error('[career/refine] Gemini fallback também falhou:', geminiErr);
+      }
+    }
     console.error('[career/refine] erro:', err);
     res.status(500).json({ error: 'Erro ao processar mensagem' });
   }

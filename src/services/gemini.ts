@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences } from '../types';
+import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerChatMessage, CareerProfile } from '../types';
 import { resolveJobLink } from './linkVerifier';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
@@ -223,6 +223,71 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
     } catch (err) {
       if (isRetryableError(err)) {
         console.warn(`[query/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+// ── Career chat fallback ──────────────────────────────────────────
+//
+// Gemini doesn't support Anthropic tool-use format, so we use a
+// text marker: the model outputs ##PROFILE_DONE## followed by JSON
+// when it has enough info to finalise the profile.
+
+const PROFILE_DONE_MARKER = '##PROFILE_DONE##';
+
+const CAREER_DONE_INSTRUCTION = `
+
+Para finalizar a análise: quando tiver coberto os temas necessários, termine sua mensagem normalmente e na linha seguinte coloque exatamente (sem texto depois do JSON):
+##PROFILE_DONE##
+{"techLiteracy":"basic","leadershipLevel":"low","workStyle":["analytical"],"desiredAreas":[],"blockedAreas":[],"hiddenSkills":[],"careerGoals":"objetivo","transitionReady":false,"transitionTarget":null,"personalitySummary":"resumo","potentialSummary":"potencial"}`;
+
+export async function sendCareerMessageGemini(
+  messages: CareerChatMessage[],
+  systemPrompt: string,
+): Promise<{ message?: string; profile?: CareerProfile; done: boolean }> {
+  if (!messages.length) throw new Error('messages não pode ser vazio');
+
+  let lastErr: unknown;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: systemPrompt + CAREER_DONE_INSTRUCTION,
+      });
+
+      // All messages except the last become chat history
+      const history = messages.slice(0, -1).map((m) => ({
+        role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
+        parts: [{ text: m.content }],
+      }));
+
+      const chat = model.startChat({ history });
+      const lastMsg = messages[messages.length - 1];
+      const result = await chat.sendMessage(lastMsg.content);
+      const text = result.response.text().trim();
+
+      console.log(`[career/gemini] ${modelName} resposta:`, text.slice(0, 120));
+
+      // Check if model signalled profile completion
+      const doneIdx = text.indexOf(PROFILE_DONE_MARKER);
+      if (doneIdx !== -1) {
+        const jsonStr = text.slice(doneIdx + PROFILE_DONE_MARKER.length).trim();
+        const profile = JSON.parse(jsonStr) as CareerProfile;
+        // Human-readable closing message before the marker
+        const closingMsg = text.slice(0, doneIdx).trim();
+        console.log(`[career/gemini] perfil finalizado via ${modelName}`);
+        return { done: true, profile, message: closingMsg || undefined };
+      }
+
+      return { done: false, message: text };
+    } catch (err) {
+      if (isRetryableError(err)) {
+        console.warn(`[career/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
         lastErr = err;
         continue;
       }
