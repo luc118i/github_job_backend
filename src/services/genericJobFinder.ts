@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
 import { searchRemotiveJobs } from './remotive';
 import { searchGupyJobs } from './gupy';
-import { findProfessionJobsGemini } from './gemini';
+import { findProfessionJobsGemini, findJobsByQueryGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
 import { isBlocked } from '../utils/inferCategory';
 import { isLawProfile, extractLawSpecialties, buildLawQueries } from '../utils/profileUtils';
@@ -332,6 +332,122 @@ Após a busca, chame return_jobs com 1 a 8 vagas mais relevantes (combinando res
   }
 
   return { profileSummary: result.profileSummary ?? '', jobs: aiJobs };
+}
+
+// ── Query-based pre-fetch (Remotive + Gupy without LinkedIn) ─────
+
+async function prefetchDirectJobsByQuery(
+  query: string,
+  preferences?: UserPreferences,
+  blockedSources?: string[],
+): Promise<string> {
+  const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
+  const queries = [query];
+  const [remotive, gupy] = await Promise.all([
+    blocked.includes('remotive') ? Promise.resolve([]) : searchRemotiveJobs(queries, preferences).catch(() => []),
+    blocked.includes('gupy')     ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+  ]);
+
+  const jobs = [...remotive, ...gupy];
+  if (!jobs.length) return '';
+
+  const list = jobs
+    .slice(0, 10)
+    .map((j, i) => {
+      const src = j.source ? ` [${j.source}]` : '';
+      return `${i + 1}. "${j.title}" — ${j.company} | ${j.location}${src}\n   Link: ${j.link || 'sem link'}\n   ${j.description.slice(0, 150)}`;
+    })
+    .join('\n\n');
+
+  return `\n\nVAGAS PRÉ-COLETADAS (Remotive + Gupy) — avalie e inclua na lista se forem relevantes:\n${list}`;
+}
+
+// ── Claude query-based search ─────────────────────────────────────
+
+async function findJobsByQueryClaude(
+  query: string,
+  preferences?: UserPreferences,
+  blockedKeywords?: string[],
+  blockedSources?: string[],
+  likedSources?: string[],
+  careerProfile?: CareerProfile,
+): Promise<ProfessionSearchResult | null> {
+  const directJobsBlock = await prefetchDirectJobsByQuery(query, preferences, blockedSources);
+  const maxAge = preferences?.maxAgeDays ?? 90;
+
+  const blockedBlock = blockedKeywords?.length
+    ? `\nNão retorne vagas com: ${blockedKeywords.join(', ')}`
+    : '';
+
+  const message = await client.messages.create(
+    {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      system: 'Você é um especialista em recrutamento. Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais — nunca invente. IMPORTANTE: ao final, você DEVE chamar return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
+      tool_choice: { type: 'any' },
+      messages: [
+        {
+          role: 'user',
+          content: `Pesquise vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${blockedBlock}${directJobsBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
+
+Após a busca, chame return_jobs com 1 a 8 vagas mais relevantes.`,
+        },
+      ],
+    },
+    { headers: { 'anthropic-beta': WEB_SEARCH_BETA } }
+  );
+
+  const toolBlock = message.content.find(
+    (block): block is Anthropic.ToolUseBlock =>
+      block.type === 'tool_use' && block.name === 'return_jobs'
+  );
+
+  if (!toolBlock) {
+    const text = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+    console.error('[query] Claude não chamou return_jobs. Resposta:', text.slice(0, 400));
+    return null;
+  }
+
+  const result = toolBlock.input as ProfessionSearchResult;
+  const jobs = Array.isArray(result.jobs) ? result.jobs : [];
+
+  if (!jobs.length) {
+    console.warn('[query] Claude chamou return_jobs com array vazio.');
+    return null;
+  }
+
+  return {
+    profileSummary: result.profileSummary ?? query,
+    jobs: jobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) })),
+  };
+}
+
+export async function findJobsByQuery(
+  query: string,
+  preferences?: UserPreferences,
+  blockedKeywords?: string[],
+  blockedSources?: string[],
+  likedSources?: string[],
+  careerProfile?: CareerProfile,
+): Promise<ProfessionSearchResult> {
+  try {
+    const result = await findJobsByQueryClaude(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
+    if (result) return result;
+    console.warn('[query] Claude retornou 0 vagas, switching to Gemini...');
+    return findJobsByQueryGemini(query, preferences);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      console.warn(`[query] Claude API error (${err.status}), switching to Gemini...`);
+      return findJobsByQueryGemini(query, preferences);
+    }
+    console.error('[query] Erro inesperado, switching to Gemini:', (err as Error).message);
+    return findJobsByQueryGemini(query, preferences);
+  }
 }
 
 // ── Entry point ───────────────────────────────────────────────────

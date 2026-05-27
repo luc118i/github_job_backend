@@ -175,3 +175,59 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
   }
   throw lastErr;
 }
+
+export async function findJobsByQueryGemini(
+  query: string,
+  preferences?: UserPreferences,
+): Promise<ProfessionSearchResult> {
+  const maxAge = preferences?.maxAgeDays ?? 90;
+  const platforms = 'Gupy, Indeed, Glassdoor, Catho, InfoJobs, Remotive, GeekHunter, Programathor, Trampos.co, LinkedIn Jobs, X/Twitter (#vagastech #hiringBR), Facebook (grupos públicos de vagas), site direto da empresa';
+  const prompt = `Pesquise 6 vagas reais publicadas nos últimos ${maxAge} dias para a busca: "${query}". Canais: ${platforms}.${buildPrefsBlock(preferences)}
+
+Retorne APENAS este JSON (sem nenhum texto fora do JSON):
+{
+  "profileSummary": "Busca: ${query}",
+  "jobs": [{
+    "title": "título real da vaga",
+    "company": "empresa real",
+    "level": "Junior|Pleno|Senior",
+    "remote": false,
+    "location": "Cidade, UF ou Remoto",
+    "tags": ["skill1", "skill2"],
+    "description": "descrição concisa em 1-2 linhas",
+    "salary": null,
+    "link": "URL real encontrada na pesquisa, ou string vazia",
+    "match": 80
+  }]
+}`;
+
+  let lastErr: unknown;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: [GOOGLE_SEARCH_TOOL] as any,
+        systemInstruction:
+          'Você é um especialista em recrutamento para todas as áreas profissionais. Sempre responda APENAS com JSON válido, sem texto antes ou depois. No campo link, coloque apenas URLs reais encontradas na pesquisa — nunca invente.',
+      });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      console.log(`[query/gemini] ${modelName} resposta:`, text.slice(0, 200));
+      const parsed = extractJson(text) as Record<string, unknown>;
+      const rawJobs = Array.isArray(parsed.jobs) ? (parsed.jobs as ProfessionSearchResult['jobs']) : [];
+      return {
+        profileSummary: (parsed.profileSummary as string) ?? `Busca: ${query}`,
+        jobs: rawJobs.map((job) => ({ ...job, link: resolveJobLink(job.link, job.title, job.company) })),
+      };
+    } catch (err) {
+      if (isRetryableError(err)) {
+        console.warn(`[query/gemini] ${modelName} falhou (${(err as Error).message}), tentando próximo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
