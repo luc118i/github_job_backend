@@ -1,4 +1,72 @@
-import { LinkedInPosition } from '../types';
+import { LinkedInPosition, LinkedInEducation } from '../types';
+
+// ── User context inference ────────────────────────────────────────
+
+/** Brazilian state abbreviations (two-letter codes). */
+const BR_STATES = new Set([
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+  'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+  'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+]);
+
+/** Tokens that indicate a Brazilian educational institution. */
+const BR_SCHOOL_TOKENS = [
+  'usp', 'unicamp', 'ufrj', 'ufmg', 'ufsc', 'ufsm', 'unifesp', 'ufba',
+  'puc', 'mackenzie', 'fatec', 'senac', 'senai', 'anhanguera',
+  'estácio', 'kroton', 'unip', 'faculdade', 'universidade federal',
+  'universidade estadual', 'cefet', 'ifsp', 'ifrj', 'fiap', 'unicesumar',
+];
+
+export interface UserContext {
+  /** True when we can detect the user is in Brazil. */
+  isBrazilian: boolean;
+  /** City name to use as Gupy `city` filter, extracted from the LinkedIn location string.
+   *  Null when no city can be reliably determined. */
+  inferredCity: string | null;
+}
+
+/** Extracts the city from a LinkedIn location string like "São Paulo, SP, Brasil" → "São Paulo". */
+function extractCity(location: string): string | null {
+  // Skip non-physical modalities
+  if (/^(remot|híbrid|hybrid|home.?office)/i.test(location.trim())) return null;
+  const first = location.split(',')[0]?.trim();
+  return first || null;
+}
+
+/** Returns true if the location string contains a Brazilian state code or "Brasil". */
+function hasBRSignal(location: string): boolean {
+  if (/brasil/i.test(location)) return true;
+  // Check each comma-delimited part against state codes
+  return location
+    .split(',')
+    .map((p) => p.trim().toUpperCase())
+    .some((p) => BR_STATES.has(p));
+}
+
+/** Infers whether the candidate is Brazilian and, if so, which city they are in.
+ *  Signals checked (in order of reliability):
+ *  1. Position `location` fields (most recent position first)
+ *  2. Education at a recognisably Brazilian institution */
+export function inferUserContext(
+  positions: LinkedInPosition[],
+  education: LinkedInEducation[],
+): UserContext {
+  // Most recent positions carry the strongest signal
+  for (const pos of positions) {
+    if (!pos.location) continue;
+    if (hasBRSignal(pos.location)) {
+      return { isBrazilian: true, inferredCity: extractCity(pos.location) };
+    }
+  }
+
+  // Fall back to education at Brazilian schools (no city available here)
+  const schoolText = education.map((e) => e.school.toLowerCase()).join(' ');
+  if (BR_SCHOOL_TOKENS.some((t) => schoolText.includes(t))) {
+    return { isBrazilian: true, inferredCity: null };
+  }
+
+  return { isBrazilian: false, inferredCity: null };
+}
 
 const LAW_TITLE_RE = /advogad|jurídic|procurad|promotor|defensor|magistrado|juiz\b|paralegal|compliance|notário|cartório|oab\b|assessor.{0,10}jur|gestor.{0,10}jur|analista.{0,10}jur|coordenador.{0,10}jur/i;
 

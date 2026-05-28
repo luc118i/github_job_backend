@@ -24,18 +24,20 @@ function formatGupyLocation(job: GupyRawJob): string {
   return city || 'Brasil';
 }
 
-export async function searchGupyJobs(
+async function fetchGupyJobs(
   queries: string[],
   preferences?: UserPreferences,
+  locationOverride?: string,
 ): Promise<AdzunaJob[]> {
   const topQueries = queries.slice(0, 3);
   const seen = new Set<string>();
   const jobs: AdzunaJob[] = [];
+  const city = locationOverride !== undefined ? locationOverride : preferences?.location;
 
   const results = await Promise.allSettled(
     topQueries.map(async (q) => {
       const params = new URLSearchParams({ jobName: q, limit: '10' });
-      if (preferences?.location) params.set('city', preferences.location);
+      if (city) params.set('city', city);
       if (preferences?.modality === 'remote') params.set('workplaceType', 'remote');
       else if (preferences?.modality === 'presencial') params.set('workplaceType', 'on-site');
       else if (preferences?.modality === 'hybrid') params.set('workplaceType', 'hybrid');
@@ -72,6 +74,25 @@ export async function searchGupyJobs(
         });
       }
     }
+  }
+
+  return jobs;
+}
+
+export async function searchGupyJobs(
+  queries: string[],
+  preferences?: UserPreferences,
+): Promise<AdzunaJob[]> {
+  // When a city is set (explicitly by the user or inferred from LinkedIn), try it first.
+  // Gupy's city filter is strict and many cities return 0 results, so fall back to a
+  // national search when the city-filtered pass comes up empty.
+  const jobs = await fetchGupyJobs(queries, preferences);
+
+  if (jobs.length === 0 && preferences?.location) {
+    console.log(`[gupy] 0 vagas em "${preferences.location}", buscando nacional...`);
+    const national = await fetchGupyJobs(queries, preferences, '');
+    console.log(`[gupy] ${national.length} vagas encontradas (nacional)`);
+    return national.slice(0, 20);
   }
 
   console.log(`[gupy] ${jobs.length} vagas encontradas`);

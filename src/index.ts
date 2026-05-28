@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './env-setup'; // MUST be first — loads .env before any module reads process.env
 import express from 'express';
 import cors from 'cors';
 import jobsRouter from './routes/jobs';

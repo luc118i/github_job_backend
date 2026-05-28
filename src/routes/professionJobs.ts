@@ -7,8 +7,18 @@ import { optionalAuth, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+/** Strips fields that aren't yet in the DB schema before inserting.
+ *  `published_at` is kept in-memory and returned in the API response
+ *  but the column needs to be added via migration before persisting it. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toInsertRow(vj: Record<string, unknown>, searchId: string): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { match: _match, published_at: _pa, ...rest } = vj;
+  return { ...rest, search_id: searchId, seen: false };
+}
+
 router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
-  const { linkedIn, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, query } = req.body as {
+  const { linkedIn, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, query, githubUsername } = req.body as {
     linkedIn?: LinkedInData;
     preferences?: UserPreferences;
     blockedKeywords?: string[];
@@ -16,14 +26,21 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     likedSources?: string[];
     careerProfile?: CareerProfile;
     query?: string;
+    githubUsername?: string | null;
   };
 
   // ── Route A: text-query search (no LinkedIn required) ──
   if (query) {
     try {
-      const result = await findJobsByQuery(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
+      const result = await findJobsByQuery(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
 
       const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
+
+      // No jobs found — return immediately without touching the DB
+      if (!rawJobs.length) {
+        res.json({ jobs: [], profileSummary: result.profileSummary ?? '' });
+        return;
+      }
 
       const verifiedJobs = await Promise.all(
         rawJobs.map(async (job) => ({
@@ -38,6 +55,9 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
           link: job.link || null,
           match: typeof job.match === 'number' ? job.match : 0,
           link_status: await verifyLink(job.link || null),
+          ...((job as { published_at?: string | null }).published_at
+            ? { published_at: (job as { published_at?: string | null }).published_at }
+            : {}),
         }))
       );
 
@@ -53,7 +73,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
       const { data: savedJobs, error: jobsError } = await supabase
         .from('jobs')
-        .insert(verifiedJobs.map(({ match: _match, ...j }) => ({ ...j, search_id: search.id, seen: false })))
+        .insert(verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)))
         .select();
 
       if (jobsError) throw new Error(jobsError.message);
@@ -61,6 +81,10 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       const jobs = (savedJobs ?? []).map((saved, i) => ({
         ...saved,
         match: verifiedJobs[i].match,
+        // Re-attach published_at from in-memory (not stored in DB until migration is run)
+        ...((verifiedJobs[i] as Record<string, unknown>)['published_at'] != null
+          ? { published_at: (verifiedJobs[i] as Record<string, unknown>)['published_at'] }
+          : {}),
       }));
 
       res.json({ jobs, profileSummary: result.profileSummary });
@@ -83,9 +107,15 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const result = await findProfessionJobs(linkedIn!.positions, linkedIn!.education, linkedIn!.certifications ?? [], preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
+    const result = await findProfessionJobs(linkedIn!.positions, linkedIn!.education, linkedIn!.certifications ?? [], preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
 
     const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
+
+    // No jobs found — return immediately without touching the DB
+    if (!rawJobs.length) {
+      res.json({ jobs: [], profileSummary: result.profileSummary ?? '' });
+      return;
+    }
 
     const verifiedJobs = await Promise.all(
       rawJobs.map(async (job) => ({
@@ -118,15 +148,18 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
     const { data: savedJobs, error: jobsError } = await supabase
       .from('jobs')
-      .insert(verifiedJobs.map(({ match: _match, ...j }) => ({ ...j, search_id: search.id, seen: false })))
+      .insert(verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)))
       .select();
 
     if (jobsError) throw new Error(jobsError.message);
 
-    // Re-attach match scores for the live response (not stored in DB)
+    // Re-attach match scores and published_at for the live response (not stored in DB)
     const jobs = (savedJobs ?? []).map((saved, i) => ({
       ...saved,
       match: verifiedJobs[i].match,
+      ...((verifiedJobs[i] as Record<string, unknown>)['published_at'] != null
+        ? { published_at: (verifiedJobs[i] as Record<string, unknown>)['published_at'] }
+        : {}),
     }));
 
     res.json({ jobs, profileSummary: result.profileSummary });

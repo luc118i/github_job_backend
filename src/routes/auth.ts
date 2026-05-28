@@ -143,6 +143,46 @@ router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) =>
   res.json({ user: { id: user.id, email: user.email, name: user.name, github_username: user.github_username ?? null } });
 });
 
+// GET /auth/preferences — lê preferências de filtragem do usuário
+router.get('/preferences', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { data: user } = await supabase
+    .from('users')
+    .select('preferences')
+    .eq('id', req.userId!)
+    .maybeSingle();
+
+  res.json({ preferences: (user?.preferences as Record<string, unknown>) ?? {} });
+});
+
+// PATCH /auth/preferences — salva preferências de filtragem do usuário
+router.patch('/preferences', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { preferences } = req.body as {
+    preferences: {
+      blocked_keywords?: string[];
+      liked_keywords?: string[];
+      blocked_sources?: string[];
+      liked_sources?: string[];
+    };
+  };
+
+  if (!preferences || typeof preferences !== 'object') {
+    res.status(400).json({ error: 'Corpo inválido' });
+    return;
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update({ preferences })
+    .eq('id', req.userId!);
+
+  if (error) {
+    res.status(500).json({ error: 'Erro ao salvar preferências' });
+    return;
+  }
+
+  res.json({ ok: true });
+});
+
 // PATCH /auth/linkedin — atualiza linkedin_data do usuário logado
 router.patch('/linkedin', requireAuth, async (req: AuthRequest, res: Response) => {
   const { linkedInData } = req.body as { linkedInData: LinkedInData };
