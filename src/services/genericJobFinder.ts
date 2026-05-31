@@ -324,11 +324,6 @@ async function findProfessionJobsClaude(
     ? ` NÃO inclua vagas nestas categorias, cargos ou áreas (incluindo sinônimos e subcategorias): ${allBlockedInPrompt.join(', ')}.${internBlock}`
     : internBlock;
 
-  // Prompt e plataformas adaptados para perfil jurídico
-  const systemPrompt = lawProfile
-    ? `Você é um especialista em recrutamento jurídico.${blockedNote} Use web_search para encontrar vagas reais em plataformas jurídicas brasileiras: Jusbrasil Empregos (jusbrasil.com.br/empregos), Conjur (conjur.com.br), Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia e departamentos jurídicos de empresas. No campo link, coloque apenas URLs reais encontradas — nunca invente. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas.`
-    : `Você é um especialista em recrutamento para todas as áreas profissionais.${blockedNote} Não inclua vagas exclusivas para PCD (Pessoa com Deficiência). Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.`;
-
   const specialtiesNote = specialties.length
     ? `\nÁreas de especialização identificadas: ${specialties.join(', ')}. Priorize vagas nessas áreas.`
     : '';
@@ -345,6 +340,22 @@ async function findProfessionJobsClaude(
     if (!userCtx.inferredCity || preferences?.location) return preferences;
     return { ...(preferences ?? { modality: 'any', location: '', salaryMin: '', salaryMax: '', level: 'any' }), location: userCtx.inferredCity };
   })();
+
+  // Reforço de localização — definido após effectivePreferences
+  const locationEnforcementLinkedIn = (() => {
+    const loc = effectivePreferences?.location;
+    const mod = effectivePreferences?.modality;
+    if (!loc) return '';
+    if (mod === 'presencial' || mod === 'hybrid') {
+      return ` RESTRIÇÃO DE LOCAL: busque SOMENTE vagas em ${loc} ou região. Não inclua vagas de outros estados.`;
+    }
+    return ` Priorize vagas em ${loc}.`;
+  })();
+
+  // Prompt e plataformas adaptados para perfil jurídico
+  const systemPrompt = lawProfile
+    ? `Você é um especialista em recrutamento jurídico.${blockedNote}${locationEnforcementLinkedIn} Use web_search para encontrar vagas reais em plataformas jurídicas brasileiras: Jusbrasil Empregos (jusbrasil.com.br/empregos), Conjur (conjur.com.br), Catho área jurídica, InfoJobs área jurídica, sites de escritórios de advocacia e departamentos jurídicos de empresas. No campo link, coloque apenas URLs reais encontradas — nunca invente. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas.`
+    : `Você é um especialista em recrutamento para todas as áreas profissionais.${blockedNote}${locationEnforcementLinkedIn} Não inclua vagas exclusivas para PCD (Pessoa com Deficiência). Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais encontradas em plataformas como Gupy, Indeed, Glassdoor, Catho, InfoJobs — nunca invente um link. Se não encontrar a URL exata, deixe o campo link vazio. NUNCA use links do LinkedIn. IMPORTANTE: ao final, chame return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.`;
 
   // Pre-fetch jobs (Remotive + Gupy) and GitHub data in parallel
   const [directJobsBlock, githubData] = await Promise.all([
@@ -513,7 +524,14 @@ async function findJobsByQueryClaude(
   careerProfile?: CareerProfile,
   linkedIn?: { positions?: LinkedInPosition[]; education?: LinkedInEducation[]; certifications?: LinkedInCertification[] } | null,
 ): Promise<ProfessionSearchResult | null> {
-  const maxAge = preferences?.maxAgeDays ?? 90;
+  // Auto-detecta cidade do LinkedIn quando o usuário não definiu localização
+  const userCtxQuery = inferUserContext(linkedIn?.positions ?? [], linkedIn?.education ?? []);
+  const effectivePreferencesQuery: UserPreferences | undefined = (() => {
+    if (!userCtxQuery.inferredCity || preferences?.location) return preferences;
+    return { ...(preferences ?? { modality: 'any', location: '', salaryMin: '', salaryMax: '', level: 'any' }), location: userCtxQuery.inferredCity };
+  })();
+
+  const maxAge = effectivePreferencesQuery?.maxAgeDays ?? 90;
 
   // Merge feedback blocked + career blocked into one list for the system prompt
   const allBlockedRaw = [
@@ -524,11 +542,22 @@ async function findJobsByQueryClaude(
   const userHasOABQuery = hasOAB(linkedIn?.certifications ?? [], linkedIn?.positions);
 
   // Pre-fetch após calcular userHasOABQuery para poder filtrar intern jobs já na seed
-  const directJobsBlock = await prefetchDirectJobsByQuery(query, preferences, blockedSources, userHasOABQuery);
+  const directJobsBlock = await prefetchDirectJobsByQuery(query, effectivePreferencesQuery, blockedSources, userHasOABQuery);
   const internBlock = userHasOABQuery ? ' NÃO inclua vagas de estágio, trainee ou jovem aprendiz — o candidato tem OAB e está habilitado a exercer advocacia.' : '';
   const blockedNote = allBlockedInPrompt.length
     ? ` NÃO inclua vagas nestas categorias, cargos ou áreas (incluindo sinônimos e subcategorias): ${allBlockedInPrompt.join(', ')}.${internBlock}`
     : internBlock;
+
+  // Reforço de localização: quando presencial e cidade detectada, instrui a IA explicitamente
+  const locationEnforcement = (() => {
+    const loc = effectivePreferencesQuery?.location;
+    const mod = effectivePreferencesQuery?.modality;
+    if (!loc) return '';
+    if (mod === 'presencial' || mod === 'hybrid') {
+      return ` RESTRIÇÃO DE LOCAL: busque SOMENTE vagas em ${loc} ou região. Não inclua vagas de outros estados.`;
+    }
+    return ` Priorize vagas em ${loc}.`;
+  })();
 
   // Build LinkedIn context block for the query path (same as LinkedIn path)
   const linkedInBlock = (() => {
@@ -544,14 +573,14 @@ async function findJobsByQueryClaude(
     {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
-      system: `Você é um especialista em recrutamento.${blockedNote} Não inclua vagas exclusivas para PCD (Pessoa com Deficiência). Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais — nunca invente. IMPORTANTE: ao final, você DEVE chamar return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.`,
+      system: `Você é um especialista em recrutamento.${blockedNote}${locationEnforcement} Não inclua vagas exclusivas para PCD (Pessoa com Deficiência). Use web_search para encontrar vagas reais. No campo link, coloque apenas URLs reais — nunca invente. IMPORTANTE: ao final, você DEVE chamar return_jobs com todas as vagas encontradas, mesmo que seja apenas 1.`,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any, RETURN_JOBS_TOOL],
       tool_choice: { type: 'any' },
       messages: [
         {
           role: 'user',
-          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABQuery ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
+          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(effectivePreferencesQuery)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABQuery ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
 
 Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Para cada vaga, preencha published_at com a data de publicação quando estiver visível (formato YYYY-MM-DD).`,
         },
