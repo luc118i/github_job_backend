@@ -1,4 +1,4 @@
-import { LinkedInPosition, LinkedInEducation } from '../types';
+import { LinkedInPosition, LinkedInEducation, LinkedInCertification } from '../types';
 
 // ── User context inference ────────────────────────────────────────
 
@@ -92,6 +92,54 @@ export function isLawProfile(positions: LinkedInPosition[]): boolean {
   return positions.some((p) => LAW_TITLE_RE.test(p.title));
 }
 
+const OAB_RE = /\boab\b|ordem\s+dos\s+advogados|exame\s+de\s+ordem/i;
+
+/**
+ * Retorna true se o usuário tem OAB — habilitado a exercer advocacia.
+ * Indica que estágios jurídicos NÃO são vagas apropriadas para ele.
+ *
+ * Verifica em 3 lugares (em ordem):
+ *  1. Certificações/licenças do LinkedIn (campo name + authority + licenseNumber)
+ *  2. Títulos e descrições de cargos (alguns usuários colocam "Advogado - OAB/DF 12345" no cargo)
+ *  3. Se o usuário tem cargo de "advogado" — implica OAB obrigatória no Brasil
+ */
+export function hasOAB(
+  certifications: LinkedInCertification[],
+  positions?: LinkedInPosition[],
+): boolean {
+  // 1. Certificações explícitas (campo mais confiável)
+  if (certifications.some((c) =>
+    OAB_RE.test(`${c.name} ${c.authority ?? ''} ${c.licenseNumber ?? ''}`)
+  )) return true;
+
+  if (!positions?.length) return false;
+
+  // 2. OAB mencionada em título ou descrição de cargo
+  if (positions.some((p) =>
+    OAB_RE.test(`${p.title} ${p.description ?? ''}`)
+  )) return true;
+
+  // 3. Cargo de "advogado" — no Brasil exige OAB obrigatoriamente
+  const LAWYER_TITLE_RE = /\badvogad[oa]\b/i;
+  return positions.some((p) => LAWYER_TITLE_RE.test(p.title));
+}
+
+/**
+ * Títulos de vaga que representam estágio ou programa de ingresso.
+ * Usado para filtrar resultados de quem já possui OAB ou nível sênior.
+ *
+ * Captura:
+ *  - "Estagiário", "Estagiária", "Estagiar"
+ *  - "Estágio em Direito", "Estágio / Direito", "Programa de Estágio"
+ *  - "Trainee", "Jovem Aprendiz", "Aprendiz"
+ *  - "intern" (inglês)
+ */
+const INTERN_RE = /\bestagi[aá](rio|ria|r)?\b|\bestágio\b|\bestagio\b|trainee\b|jovem\s+aprendiz|\baprendiz\b|\bintern\b/i;
+
+export function isInternJob(title: string): boolean {
+  return INTERN_RE.test(title);
+}
+
 // Retorna as áreas de especialização encontradas no histórico profissional
 export function extractLawSpecialties(positions: LinkedInPosition[]): string[] {
   const found = new Set<string>();
@@ -105,8 +153,20 @@ export function extractLawSpecialties(positions: LinkedInPosition[]): string[] {
 }
 
 // Gera queries de busca jurídicas com base no perfil
-export function buildLawQueries(positions: LinkedInPosition[], specialties: string[]): string[] {
-  const queries = new Set<string>(['advogado', 'analista jurídico', 'assessor jurídico']);
+export function buildLawQueries(
+  positions: LinkedInPosition[],
+  specialties: string[],
+  certifications: LinkedInCertification[] = [],
+): string[] {
+  const oab = hasOAB(certifications, positions);
+
+  // Usuário com OAB: apenas vagas de advogado habilitado
+  // Usuário sem OAB: inclui estágio/paralegal
+  const baseQueries = oab
+    ? ['advogado', 'advogado junior', 'analista jurídico', 'assessor jurídico']
+    : ['advogado', 'estagiário direito', 'paralegal', 'analista jurídico'];
+
+  const queries = new Set<string>(baseQueries);
 
   // Queries específicas por especialidade
   for (const s of specialties) {
@@ -116,7 +176,10 @@ export function buildLawQueries(positions: LinkedInPosition[], specialties: stri
   // Cargo mais recente como query direta
   if (positions.length > 0) {
     const lastTitle = positions[0].title.toLowerCase().trim();
-    if (lastTitle.length <= 40) queries.add(lastTitle);
+    // Se tem OAB, não inclui o título se for de estágio
+    if (lastTitle.length <= 40 && (!oab || !isInternJob(lastTitle))) {
+      queries.add(lastTitle);
+    }
   }
 
   return Array.from(queries).slice(0, 6);

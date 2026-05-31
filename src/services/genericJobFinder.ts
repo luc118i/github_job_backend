@@ -2,10 +2,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
 import { searchRemotiveJobs } from './remotive';
 import { searchGupyJobs } from './gupy';
+import { searchAdzunaJobs } from './adzuna';
+import { searchJoobleJobs } from './jooble';
+import { searchSineJobs } from './sine';
+import { fetchProgramathorJobs } from './programathor';
 import { findProfessionJobsGemini, findJobsByQueryGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
-import { isBlocked, isPcdExclusive } from '../utils/inferCategory';
-import { isLawProfile, extractLawSpecialties, buildLawQueries, inferUserContext } from '../utils/profileUtils';
+import { isBlocked, isPcdExclusive, expandBlockedTerms } from '../utils/inferCategory';
+import { isLawProfile, extractLawSpecialties, buildLawQueries, inferUserContext, hasOAB, isInternJob } from '../utils/profileUtils';
 import { fetchLegalJobs } from './legalJobs';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -98,7 +102,8 @@ function buildCareerProfileBlock(profile?: CareerProfile): string {
   }
 
   if (profile.blockedAreas.length) {
-    lines.push(`IMPORTANTE — não retorne vagas nestas áreas: ${profile.blockedAreas.join(', ')}`);
+    const expanded = expandBlockedTerms(profile.blockedAreas);
+    lines.push(`IMPORTANTE — NÃO retorne vagas nestas áreas nem cargos relacionados (incluindo sinônimos e subcategorias): ${expanded.join(', ')}.`);
   }
 
   if (profile.potentialSummary) {
@@ -223,23 +228,25 @@ async function prefetchDirectJobs(
     queries = [title];
   }
   const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
-  const [remotive, gupy] = await Promise.all([
-    blocked.includes('remotive') ? Promise.resolve([]) : searchRemotiveJobs(queries, preferences).catch(() => []),
-    blocked.includes('gupy')     ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+  const [gupy, adzuna, jooble, sine] = await Promise.all([
+    blocked.includes('gupy')           ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+    blocked.includes('adzuna')         ? Promise.resolve([]) : searchAdzunaJobs(queries, preferences).catch(() => []),
+    blocked.includes('jooble')         ? Promise.resolve([]) : searchJoobleJobs(queries, preferences).catch(() => []),
+    blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  const jobs = [...remotive, ...gupy];
+  const jobs = [...gupy, ...adzuna, ...jooble, ...sine];
   if (!jobs.length) return '';
 
   const list = jobs
-    .slice(0, 10)
+    .slice(0, 15)
     .map((j, i) => {
       const src = j.source ? ` [${j.source}]` : '';
       return `${i + 1}. "${j.title}" — ${j.company} | ${j.location}${src}\n   Link: ${j.link || 'sem link'}\n   ${j.description.slice(0, 150)}`;
     })
     .join('\n\n');
 
-  return `\n\nVAGAS PRÉ-COLETADAS (Remotive + Gupy) — avalie e inclua na lista se forem relevantes para o perfil:\n${list}`;
+  return `\n\nVAGAS PRÉ-COLETADAS (Gupy + Adzuna + Jooble + Emprega Brasil) — avalie e inclua na lista se forem relevantes para o perfil:\n${list}`;
 }
 
 // ── Tool definition ───────────────────────────────────────────────
@@ -301,15 +308,18 @@ async function findProfessionJobsClaude(
 ): Promise<ProfessionSearchResult | null> {
   const lawProfile = isLawProfile(positions);
   const specialties = lawProfile ? extractLawSpecialties(positions) : [];
+  const userHasOABInClaude = hasOAB(certifications, positions);
 
   // Merge feedback blocked + career blocked into one list for the system prompt
-  const allBlockedInPrompt = [
+  const allBlockedRaw = [
     ...(blockedKeywords ?? []),
     ...(careerProfile?.blockedAreas ?? []),
   ];
+  const allBlockedInPrompt = expandBlockedTerms(allBlockedRaw);
+  const internBlock = userHasOABInClaude ? ' NÃO inclua vagas de estágio, trainee ou jovem aprendiz — o candidato tem OAB e está habilitado a exercer advocacia.' : '';
   const blockedNote = allBlockedInPrompt.length
-    ? ` NÃO inclua vagas nestas categorias ou áreas: ${allBlockedInPrompt.join(', ')}.`
-    : '';
+    ? ` NÃO inclua vagas nestas categorias, cargos ou áreas (incluindo sinônimos e subcategorias): ${allBlockedInPrompt.join(', ')}.${internBlock}`
+    : internBlock;
 
   // Prompt e plataformas adaptados para perfil jurídico
   const systemPrompt = lawProfile
@@ -423,7 +433,7 @@ Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade.
 
   // Para perfis jurídicos, busca fontes especializadas em paralelo com o resultado da IA
   if (lawProfile) {
-    const lawQueries = buildLawQueries(positions, specialties);
+    const lawQueries = buildLawQueries(positions, specialties, certifications);
     const legalSourceJobs = await fetchLegalJobs(lawQueries, preferences, blockedKeywords);
 
     const legalProfJobs = legalSourceJobs
@@ -466,23 +476,25 @@ async function prefetchDirectJobsByQuery(
 ): Promise<string> {
   const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
   const queries = [query];
-  const [remotive, gupy] = await Promise.all([
-    blocked.includes('remotive') ? Promise.resolve([]) : searchRemotiveJobs(queries, preferences).catch(() => []),
-    blocked.includes('gupy')     ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+  const [gupy, adzuna, jooble, sine] = await Promise.all([
+    blocked.includes('gupy')           ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+    blocked.includes('adzuna')         ? Promise.resolve([]) : searchAdzunaJobs(queries, preferences).catch(() => []),
+    blocked.includes('jooble')         ? Promise.resolve([]) : searchJoobleJobs(queries, preferences).catch(() => []),
+    blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  const jobs = [...remotive, ...gupy];
+  const jobs = [...gupy, ...adzuna, ...jooble, ...sine];
   if (!jobs.length) return '';
 
   const list = jobs
-    .slice(0, 10)
+    .slice(0, 15)
     .map((j, i) => {
       const src = j.source ? ` [${j.source}]` : '';
       return `${i + 1}. "${j.title}" — ${j.company} | ${j.location}${src}\n   Link: ${j.link || 'sem link'}\n   ${j.description.slice(0, 150)}`;
     })
     .join('\n\n');
 
-  return `\n\nVAGAS PRÉ-COLETADAS (Remotive + Gupy) — avalie e inclua na lista se forem relevantes:\n${list}`;
+  return `\n\nVAGAS PRÉ-COLETADAS (Gupy + Adzuna + Jooble + Emprega Brasil) — avalie e inclua na lista se forem relevantes:\n${list}`;
 }
 
 // ── Claude query-based search ─────────────────────────────────────
@@ -494,18 +506,32 @@ async function findJobsByQueryClaude(
   blockedSources?: string[],
   likedSources?: string[],
   careerProfile?: CareerProfile,
+  linkedIn?: { positions?: LinkedInPosition[]; education?: LinkedInEducation[]; certifications?: LinkedInCertification[] } | null,
 ): Promise<ProfessionSearchResult | null> {
   const directJobsBlock = await prefetchDirectJobsByQuery(query, preferences, blockedSources);
   const maxAge = preferences?.maxAgeDays ?? 90;
 
   // Merge feedback blocked + career blocked into one list for the system prompt
-  const allBlockedInPrompt = [
+  const allBlockedRaw = [
     ...(blockedKeywords ?? []),
     ...(careerProfile?.blockedAreas ?? []),
   ];
+  const allBlockedInPrompt = expandBlockedTerms(allBlockedRaw);
+  const userHasOABQuery = hasOAB(linkedIn?.certifications ?? [], linkedIn?.positions);
+  const internBlock = userHasOABQuery ? ' NÃO inclua vagas de estágio, trainee ou jovem aprendiz — o candidato tem OAB e está habilitado a exercer advocacia.' : '';
   const blockedNote = allBlockedInPrompt.length
-    ? ` NÃO inclua vagas nestas categorias ou áreas: ${allBlockedInPrompt.join(', ')}.`
-    : '';
+    ? ` NÃO inclua vagas nestas categorias, cargos ou áreas (incluindo sinônimos e subcategorias): ${allBlockedInPrompt.join(', ')}.${internBlock}`
+    : internBlock;
+
+  // Build LinkedIn context block for the query path (same as LinkedIn path)
+  const linkedInBlock = (() => {
+    if (!linkedIn?.positions?.length && !linkedIn?.education?.length) return '';
+    const parts: string[] = ['\nCURRÍCULO DO CANDIDATO (use para personalizar os resultados):'];
+    if (linkedIn.positions?.length) parts.push(`Experiência: ${formatPositions(linkedIn.positions)}`);
+    if (linkedIn.education?.length)  parts.push(`Formação: ${formatEducation(linkedIn.education)}`);
+    if (linkedIn.certifications?.length) parts.push(formatCertifications(linkedIn.certifications).trim());
+    return parts.join('\n');
+  })();
 
   const message = await client.messages.create(
     {
@@ -518,7 +544,7 @@ async function findJobsByQueryClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
+          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
 
 Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Para cada vaga, preencha published_at com a data de publicação quando estiver visível (formato YYYY-MM-DD).`,
         },
@@ -580,11 +606,24 @@ export async function findJobsByQuery(
   likedSources?: string[],
   careerProfile?: CareerProfile,
   githubUsername?: string | null,
+  certifications?: LinkedInCertification[],
+  linkedIn?: { positions?: LinkedInPosition[]; education?: LinkedInEducation[]; certifications?: LinkedInCertification[] } | null,
 ): Promise<ProfessionSearchResult> {
+  const userHasOAB = hasOAB(certifications ?? [], linkedIn?.positions);
+
+  function applyInternFilter(result: ProfessionSearchResult): ProfessionSearchResult {
+    if (!userHasOAB) return result;
+    const filtered = result.jobs.filter((j) => !isInternJob(j.title));
+    if (filtered.length < result.jobs.length) {
+      console.log(`[query] OAB detectada → removidas ${result.jobs.length - filtered.length} vaga(s) de estágio/trainee`);
+    }
+    return { ...result, jobs: filtered };
+  }
+
   // Step 1: Claude
   try {
-    const result = await findJobsByQueryClaude(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile);
-    if (result && result.jobs.length > 0) return result;
+    const result = await findJobsByQueryClaude(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, linkedIn);
+    if (result && result.jobs.length > 0) return applyInternFilter(result);
     console.warn('[query] Claude retornou 0 vagas úteis, tentando Gemini...');
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
@@ -597,14 +636,14 @@ export async function findJobsByQuery(
   // Step 2: Gemini
   try {
     const result = applyBlockFilter(await findJobsByQueryGemini(query, preferences), blockedKeywords, careerProfile);
-    if (result.jobs.length > 0) return result;
+    if (result.jobs.length > 0) return applyInternFilter(result);
     console.warn('[query] Gemini retornou 0 vagas úteis, usando script direto...');
   } catch {
     console.warn('[query] Gemini falhou, usando script direto...');
   }
 
   // Step 3: Smart script fallback — GitHub tech stack + career profile signals
-  return fetchDirectJobs([query], preferences, blockedKeywords, careerProfile, githubUsername);
+  return applyInternFilter(await fetchDirectJobs([query], preferences, blockedKeywords, careerProfile, githubUsername));
 }
 
 // ── Fallback helpers (used when AI is unavailable) ────────────────
@@ -684,73 +723,214 @@ function scoreJobByProfile(
 
 // ── Portuguese query expansion ────────────────────────────────────
 
-/** Maps generic IT area terms to concrete Portuguese job-title queries that
- *  Brazilian job boards (Gupy, etc.) actually understand. */
-const IT_BR_EXPANSIONS: Record<string, string[]> = {
-  'tecnologia da informacao': ['desenvolvedor junior', 'programador junior', 'analista de sistemas junior'],
-  'tecnologia':               ['desenvolvedor junior', 'programador junior'],
-  'ti':                       ['desenvolvedor junior', 'suporte tecnico ti'],
-  'desenvolvimento web':      ['desenvolvedor web junior', 'desenvolvedor fullstack junior'],
-  'desenvolvimento de software': ['desenvolvedor junior', 'programador junior'],
-  'backend':                  ['desenvolvedor backend junior', 'programador backend'],
-  'frontend':                 ['desenvolvedor frontend junior', 'desenvolvedor react junior'],
-  'dados':                    ['analista de dados junior', 'cientista de dados junior'],
-  'data science':             ['cientista de dados junior', 'analista de dados'],
-  'devops':                   ['engenheiro devops junior', 'analista de infraestrutura'],
-  'mobile':                   ['desenvolvedor mobile junior', 'desenvolvedor android junior'],
-  'suporte':                  ['analista de suporte junior', 'tecnico de suporte ti'],
+/** Maps area terms (all professional areas) to concrete PT-BR job-title queries
+ *  that Brazilian boards (Gupy, Remotive, etc.) actually understand.
+ *  Ordered by seniority: junior / assistente first so results skew entry-level. */
+// Queries curtas (2-3 palavras) — Gupy faz match de substring no título.
+// "analista de logistica junior" → 0 resultado porque vagas se chamam só "Analista de Logística".
+// Nível não entra na query; o match scoring cuida de priorizar vagas adequadas ao perfil.
+const AREA_BR_EXPANSIONS: Record<string, string[]> = {
+  // ── T.I / Tecnologia ──────────────────────────────────────────────
+  'tecnologia da informacao': ['desenvolvedor', 'analista de sistemas', 'suporte ti'],
+  'tecnologia':               ['desenvolvedor', 'analista de ti'],
+  'ti':                       ['desenvolvedor', 'analista ti', 'suporte tecnico'],
+  'desenvolvimento web':      ['desenvolvedor web', 'desenvolvedor fullstack'],
+  'desenvolvimento de software': ['desenvolvedor software', 'programador'],
+  'backend':                  ['desenvolvedor backend', 'engenheiro backend'],
+  'frontend':                 ['desenvolvedor frontend', 'desenvolvedor react'],
+  'full stack':               ['desenvolvedor fullstack', 'desenvolvedor full stack'],
+  'dados':                    ['analista de dados', 'analista bi', 'engenheiro de dados'],
+  'data science':             ['cientista de dados', 'analista de dados'],
+  'engenharia de dados':      ['engenheiro de dados', 'analista de dados'],
+  'machine learning':         ['engenheiro machine learning', 'cientista de dados'],
+  'devops':                   ['engenheiro devops', 'analista infraestrutura'],
+  'mobile':                   ['desenvolvedor mobile', 'desenvolvedor android', 'desenvolvedor flutter'],
+  'seguranca':                ['analista seguranca', 'analista ciberseguranca'],
+  'suporte':                  ['analista de suporte', 'tecnico suporte', 'helpdesk'],
+  'design':                   ['designer ux', 'designer ui', 'web designer'],
+  // ── Administrativo / Escritório ───────────────────────────────────
+  'administrativo':           ['assistente administrativo', 'auxiliar administrativo', 'analista administrativo'],
+  'administracao':            ['assistente administrativo', 'auxiliar administrativo'],
+  'secretaria':               ['secretaria executiva', 'assistente administrativo'],
+  // ── Financeiro / Contábil ─────────────────────────────────────────
+  'financas':                 ['assistente financeiro', 'analista financeiro', 'auxiliar financeiro'],
+  'financeiro':               ['assistente financeiro', 'analista financeiro'],
+  'contabilidade':            ['assistente contabil', 'analista contabil', 'auxiliar contabil'],
+  'fiscal':                   ['assistente fiscal', 'analista fiscal'],
+  'controladoria':            ['analista controladoria', 'assistente controladoria'],
+  // ── Recursos Humanos ──────────────────────────────────────────────
+  'recursos humanos':         ['assistente rh', 'analista rh', 'analista recrutamento'],
+  'rh':                       ['analista rh', 'assistente recursos humanos', 'recrutamento selecao'],
+  'recrutamento':             ['analista recrutamento', 'assistente recrutamento'],
+  // ── Vendas / Comercial ────────────────────────────────────────────
+  'vendas':                   ['assistente comercial', 'analista vendas', 'representante comercial', 'vendedor'],
+  'comercial':                ['assistente comercial', 'analista comercial'],
+  'marketing':                ['assistente marketing', 'analista marketing', 'analista midia'],
+  'inside sales':             ['sdr', 'representante vendas'],
+  // ── Logística / Operacional ───────────────────────────────────────
+  'logistica':                ['assistente logistica', 'auxiliar logistica', 'analista logistica', 'operador logistica'],
+  'supply chain':             ['analista supply chain', 'assistente suprimentos'],
+  'compras':                  ['assistente compras', 'analista compras'],
+  // ── Saúde ──────────────────────────────────────────────────────────
+  'saude':                    ['tecnico enfermagem', 'auxiliar saude', 'assistente farmacia'],
+  'enfermagem':               ['tecnico enfermagem', 'auxiliar enfermagem'],
+  // ── Educação ──────────────────────────────────────────────────────
+  'educacao':                 ['professor', 'instrutor', 'tutor'],
+  'pedagogia':                ['professor', 'auxiliar de sala'],
+  // ── Jurídico ──────────────────────────────────────────────────────
+  'juridico':                 ['advogado', 'assistente juridico', 'analista juridico'],
+  'direito':                  ['advogado', 'assistente juridico', 'analista juridico'],
+  'advocacia':                ['advogado', 'advogado associado', 'advogado trabalhista'],
+  'trabalhista':              ['advogado trabalhista', 'analista trabalhista'],
+  'tributario':               ['advogado tributario', 'analista tributario'],
+  'contratos':                ['analista contratos', 'advogado contratos'],
+  'compliance':               ['analista compliance', 'assistente compliance'],
+  'licitacoes':               ['analista licitacoes', 'assistente licitacoes'],
+  'oab':                      ['advogado', 'advogado associado', 'advogado junior'],
+  // ── Construção / Engenharia ────────────────────────────────────────
+  'construcao':               ['auxiliar manutencao', 'tecnico manutencao', 'eletricista'],
+  'engenharia civil':         ['engenheiro civil', 'tecnico edificacoes'],
+  // ── Atendimento / Relacionamento ─────────────────────────────────
+  'atendimento':              ['assistente atendimento', 'atendente', 'analista relacionamento'],
+  'customer success':         ['analista customer success', 'customer success'],
+  // ── Produto ───────────────────────────────────────────────────────
+  'produto':                  ['analista produto', 'product manager'],
+  // ── Genérico / fallback ───────────────────────────────────────────
+  'estagio':                  ['estagiario administrativo', 'estagiario ti', 'estagio'],
+  'trainee':                  ['trainee', 'programa trainee'],
 };
 
 /** Normalises a technology name for use in Brazilian job title queries.
  *  e.g. "JavaScript" → "desenvolvedor JavaScript",  "React" → "desenvolvedor React" */
 function techToPortugueseQuery(tech: string): string {
-  // Topics that are not programming languages / frameworks — skip them
   const skip = new Set(['web', 'api', 'open-source', 'linux', 'git', 'docker', 'cli', 'tool', 'library', 'framework']);
   if (skip.has(tech.toLowerCase())) return '';
   return `desenvolvedor ${tech}`;
 }
 
-/** Builds a deduplicated list of search queries combining:
- *  - base queries (transition target / current title / free-text query)
- *  - IT area expansions in Portuguese (e.g. "TI" → "desenvolvedor junior")
- *  - career profile desiredAreas and hiddenSkills
- *  - top GitHub technologies as "desenvolvedor X" queries */
-function buildFallbackQueries(
-  baseQueries: string[],
+/** Normaliza string para lookup no AREA_BR_EXPANSIONS (sem acento, lowercase) */
+function normalizeKey(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+/**
+ * Gera queries amplas a partir do perfil completo do usuário.
+ * Substitui buildFallbackQueries quando há perfil de carreira disponível.
+ *
+ * Estratégia:
+ *  1. Expande todas as desiredAreas (não só 2) via AREA_BR_EXPANSIONS
+ *  2. Usa transitionTarget como sinal adicional
+ *  3. Inclui hiddenSkills como queries diretas
+ *  4. Adiciona "desenvolvedor X" para tech stack GitHub
+ *  5. Nunca filtra demais — retorna até 10 queries diversas
+ */
+function buildProfileDefaultQueries(
   careerProfile?: CareerProfile,
   techStack: string[] = [],
+  baseQueries: string[] = [],
 ): string[] {
   const queries = new Set<string>();
 
-  // Expand base queries: replace generic IT terms with real Portuguese job titles
-  for (const q of baseQueries.filter(Boolean)) {
-    const key = q.toLowerCase().trim();
-    const expanded = IT_BR_EXPANSIONS[key];
+  // 1. Todas as desiredAreas com expansão completa
+  for (const area of careerProfile?.desiredAreas ?? []) {
+    const key = normalizeKey(area);
+    const expanded = AREA_BR_EXPANSIONS[key];
     if (expanded) {
-      expanded.forEach((e) => queries.add(e));
+      expanded.slice(0, 2).forEach((e) => queries.add(e));
     } else {
-      queries.add(q);
+      // Área não mapeada: usa como query direta (pode ser cargo específico)
+      queries.add(area);
     }
   }
 
-  // Expand desiredAreas the same way
-  for (const area of careerProfile?.desiredAreas?.slice(0, 2) ?? []) {
-    const key = area.toLowerCase().trim();
-    const expanded = IT_BR_EXPANSIONS[key];
-    if (expanded) expanded.forEach((e) => queries.add(e));
-    else queries.add(area);
+  // 2. transitionTarget como sinal forte
+  if (careerProfile?.transitionTarget) {
+    const key = normalizeKey(careerProfile.transitionTarget);
+    const expanded = AREA_BR_EXPANSIONS[key];
+    if (expanded) {
+      expanded.slice(0, 2).forEach((e) => queries.add(e));
+    } else {
+      queries.add(careerProfile.transitionTarget);
+    }
   }
 
-  // Hidden skills as-is (e.g. "análise de dados", "automação")
-  careerProfile?.hiddenSkills?.slice(0, 2).forEach((s) => queries.add(s));
+  // 3. hiddenSkills técnicas como queries (ex: "análise de dados", "power bi")
+  //    Exclui soft skills e frases longas que nunca aparecem em títulos de vagas
+  const SOFT_SKILL_WORDS = /capacidade|habilidade|informal|liderança|comunic|trabalho em equipe|proativ|organiz|responsab|relacionamento/i;
+  for (const skill of careerProfile?.hiddenSkills?.slice(0, 4) ?? []) {
+    // Só inclui se: curto (≤ 25 chars), sem espaços múltiplos, sem palavras de soft skill
+    if (skill.length <= 25 && skill.trim().split(/\s+/).length <= 3 && !SOFT_SKILL_WORDS.test(skill)) {
+      queries.add(skill.trim());
+    }
+  }
 
-  // GitHub tech stack → "desenvolvedor X" in Portuguese
-  techStack.slice(0, 3).forEach((t) => {
-    const q = techToPortugueseQuery(t);
+  // 4. GitHub tech stack → "desenvolvedor X"
+  for (const tech of techStack.slice(0, 3)) {
+    const q = techToPortugueseQuery(tech);
     if (q) queries.add(q);
-  });
+  }
 
-  return [...queries].slice(0, 6);
+  // 6. Base queries como fallback (só se queries ainda insuficientes)
+  if (queries.size < 3) {
+    for (const q of baseQueries.filter(Boolean)) {
+      const key = normalizeKey(q);
+      const expanded = AREA_BR_EXPANSIONS[key];
+      if (expanded) expanded.slice(0, 2).forEach((e) => queries.add(e));
+      else queries.add(q);
+    }
+  }
+
+  // Garante ao menos uma query genérica se tudo falhou
+  if (queries.size === 0) queries.add('analista junior');
+
+  return [...queries].slice(0, 10);
+}
+
+
+// ── PT-BR language filter ─────────────────────────────────────────
+
+/** Palavras que indicam título em inglês (não PT-BR) */
+const EN_TITLE_WORDS = new Set([
+  'engineer','manager','developer','designer','analyst','specialist',
+  'coordinator','director','officer','lead','head','staff','principal',
+  'associate','intern','consultant','architect','scientist','researcher',
+  'accountant','recruiter','representative','executive','administrator',
+]);
+
+/**
+ * Retorna true se o título da vaga parece estar em português.
+ * Heurística: não contém palavras-chave exclusivamente em inglês,
+ * OU tem pelo menos uma palavra claramente portuguesa.
+ */
+function isPtBrTitle(title: string): boolean {
+  const words = title.toLowerCase().split(/\s+/);
+  const hasPtWord = words.some((w) =>
+    /^(analista|assistente|auxiliar|operador|supervisor|gerente|coordenador|técnico|desenvolvedor|programador|estagi|trainee|jovem|aprendiz|vendedor|atendente|motorista|enfermeiro|professor|contador|advogado|engenheiro|arquiteto|diretor|consultor|especialista|agente|recepcionista|almoxarife|fiscal)/.test(w)
+  );
+  if (hasPtWord) return true;
+
+  const hasEnWord = words.some((w) => EN_TITLE_WORDS.has(w.replace(/[^a-z]/g, '')));
+  return !hasEnWord; // se não tem palavra inglesa clara, aceita
+}
+
+// ── Level inference from job title ───────────────────────────────
+/**
+ * Infere o nível de senioridade a partir do título da vaga.
+ * Retorna null quando o título não indica nível (usa o do perfil como fallback).
+ */
+function inferLevelFromTitle(title: string): 'Junior' | 'Pleno' | 'Senior' | null {
+  const t = title.toLowerCase();
+
+  // Senior keywords
+  if (/\b(staff|principal|senior|sênior|sr\.?\s|lead|head|director|diretor|gerente|manager|vp\b|c-level|cto|coo|cfo|ceo|arquiteto|architect)\b/.test(t)) return 'Senior';
+
+  // Pleno keywords
+  if (/\b(pleno|pl\.?\s|mid[- ]?level|mid\b)\b/.test(t)) return 'Pleno';
+
+  // Junior keywords
+  if (/\b(junior|júnior|jr\.?\s|trainee|aprendiz|estagi[aá]rio|auxiliar|assistente)\b/.test(t)) return 'Junior';
+
+  return null; // título não indica nível
 }
 
 // ── Direct job-board fallback (Remotive + Gupy, no AI) ────────────
@@ -776,7 +956,10 @@ async function fetchDirectJobs(
   const techStack = github.techStack;
 
   // Build smart queries using all available profile signals
-  const queries = buildFallbackQueries(baseQueries, careerProfile, techStack);
+  // buildProfileDefaultQueries usa TODO o perfil (todas as áreas, skills, transição)
+  // para gerar até 10 queries amplas — não apenas as 2 primeiras desiredAreas
+  const queries = buildProfileDefaultQueries(careerProfile, techStack, baseQueries);
+  console.log('[fetchDirectJobs] queries geradas:', queries);
 
   // Infer level without AI
   const level = inferLevelFromProfile(careerProfile, positions);
@@ -789,32 +972,52 @@ async function fetchDirectJobs(
     return { ...(preferences ?? { modality: 'any', location: '', salaryMin: '', salaryMax: '', level: 'any' }), location: userCtx.inferredCity };
   })();
 
-  // Remotive = English global board → only useful for explicit remote searches.
-  // For "any" / presencial / hybrid, Gupy (Brazilian, Portuguese) is the right source.
   const wantRemote = preferences?.modality === 'remote';
+  const allBlocked = [...(blockedKeywords ?? []), ...(careerProfile?.blockedAreas ?? [])];
 
-  const [gupy, remotive] = await Promise.all([
-    searchGupyJobs(queries, effectivePreferences).catch(() => []),
-    wantRemote
-      ? searchRemotiveJobs(queries, effectivePreferences).catch(() => [])
-      : Promise.resolve([]),
+  // Detecta perfil de TI para incluir Programathor (RSS de vagas tech BR)
+  const isTechProfile = (careerProfile?.desiredAreas ?? [])
+    .some((a) => /ti\b|tecnologia|software|dados|dev|front|back|full|mobile|devops/i.test(a));
+
+  // Busca em todas as fontes em paralelo
+  const [gupy, adzuna, jooble, sine, remotive, programathor] = await Promise.all([
+    searchGupyJobs(queries, effectivePreferences).catch((e) => { console.error('[gupy]', e); return []; }),
+    searchAdzunaJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[adzuna]', e); return []; }),
+    searchJoobleJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[jooble]', e); return []; }),
+    searchSineJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[sine]', e); return []; }),
+    searchRemotiveJobs(queries, effectivePreferences).catch((e) => { console.error('[remotive]', e); return []; }),
+    isTechProfile ? fetchProgramathorJobs().catch(() => []) : Promise.resolve([]),
   ]);
 
-  // Gupy first (local/national results), Remotive as supplement only on remote searches
-  const allRaw = [...gupy, ...remotive];
+  // Remotive só quando usuário quer remoto ou fontes nacionais retornaram pouco
+  const nationalCount = gupy.length + adzuna.length + jooble.length + sine.length + programathor.length;
+  const remotiveCap = wantRemote
+    ? remotive.length
+    : nationalCount < 5
+      ? Math.min(remotive.length, 3)
+      : 0;
 
-  const allBlocked = [...(blockedKeywords ?? []), ...(careerProfile?.blockedAreas ?? [])];
+  const allRaw = [...gupy, ...adzuna, ...jooble, ...sine, ...programathor, ...remotive.slice(0, remotiveCap)];
+
+  const ptBrOnly = preferences?.ptBrOnly ?? false;
+
   const jobs = allRaw
     .filter((j) => !isBlocked(j.title, allBlocked))
     .filter((j) => !isPcdExclusive(j.title))
+    .filter((j) => !ptBrOnly || isPtBrTitle(j.title))
     .map((j) => {
       const match = scoreJobByProfile({ title: j.title, description: j.description }, techStack, careerProfile);
       const jobText = `${j.title} ${j.description}`.toLowerCase();
       const tags = techStack.filter((t) => jobText.includes(t.toLowerCase())).slice(0, 6);
+
+      // Nível inferido do TÍTULO da vaga (não do perfil do candidato)
+      // para evitar mostrar "Staff Engineer" como Júnior
+      const jobLevel = inferLevelFromTitle(j.title) ?? level;
+
       return {
         title:       j.title,
         company:     j.company,
-        level,
+        level:       jobLevel,
         remote:      j.location?.toLowerCase().includes('remot') ?? false,
         location:    j.location ?? null,
         tags,
@@ -825,11 +1028,9 @@ async function fetchDirectJobs(
         ...(j.published_at ? { published_at: j.published_at } : {}),
       };
     })
-    // Score filter only makes sense when we have a real tech stack to measure overlap.
-    // Without GitHub data, trust the query results (already targeted by buildFallbackQueries).
-    .filter((j) => !techStack.length || j.match >= 30)
+    .filter((j) => !techStack.length || j.match >= 10)
     .sort((a, b) => b.match - a.match)
-    .slice(0, 15);
+    .slice(0, 30);
 
   // Build a meaningful profile summary without "Em transição" language
   const techLabel  = techStack.slice(0, 3).join(', ');
@@ -899,8 +1100,9 @@ export async function findProfessionJobs(
         const geminiResult = await findJobsByQueryGemini(target, preferences);
         const filtered = applyBlockFilter(geminiResult, blockedKeywords, careerProfile);
         if (filtered.jobs.length > 0) return filtered;
-      } catch {
-        // fall through
+        console.warn('[profession] Gemini retornou 0 vagas úteis (transition)');
+      } catch (err) {
+        console.warn('[profession] Gemini erro (transition):', (err as Error)?.message ?? err);
       }
 
       // Step 3: Smart script fallback — GitHub tech stack + career profile signals
@@ -931,9 +1133,20 @@ export async function findProfessionJobs(
     );
   }
 
+  // Se o usuário tem OAB, estágios/trainee são irrelevantes — filtra em todo resultado
+  const userHasOAB = hasOAB(certifications, positions);
+  function applyInternFilter(result: ProfessionSearchResult): ProfessionSearchResult {
+    if (!userHasOAB) return result;
+    const filtered = result.jobs.filter((j) => !isInternJob(j.title));
+    if (filtered.length < result.jobs.length) {
+      console.log(`[profession] OAB detectada → removidas ${result.jobs.length - filtered.length} vaga(s) de estágio/trainee`);
+    }
+    return { ...result, jobs: filtered };
+  }
+
   try {
     const result = await findProfessionJobsClaude(positions, education, certifications, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
-    if (result && result.jobs.length > 0) return result;
+    if (result && result.jobs.length > 0) return applyInternFilter(result);
     console.warn('[profession] Claude retornou 0 vagas úteis, ativando fallback...');
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
@@ -942,5 +1155,5 @@ export async function findProfessionJobs(
       console.error('[profession] Erro inesperado, ativando fallback:', (err as Error).message);
     }
   }
-  return fallback();
+  return applyInternFilter(await fallback());
 }

@@ -1,11 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { Job, JobSearchRequest, RepoContext, UserPreferences } from '../types';
+import { Job, JobSearchRequest, RepoContext } from '../types';
 import { AdzunaJob, searchAllQueries } from './adzuna';
 import { searchRemotiveJobs } from './remotive';
 import { searchGupyJobs } from './gupy';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
+import { buildPrefsBlock } from '../utils/buildPrefsBlock';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const WEB_SEARCH_BETA = 'web-search-2025-03-05';
@@ -34,22 +35,7 @@ function buildSourceHints(blocked?: string[], liked?: string[]): string {
   return lines.length ? '\n' + lines.join('\n') : '';
 }
 
-function buildPreferencesSummary(prefs: UserPreferences | undefined): string {
-  if (!prefs) return '';
-  const lines: string[] = [];
-  const modalityLabel: Record<string, string> = {
-    remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '',
-  };
-  if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
-  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
-  if (prefs.salaryMin || prefs.salaryMax) {
-    const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
-    lines.push(`Faixa salarial: ${range}`);
-  }
-  if (prefs.level !== 'any') lines.push(`Nível desejado: ${prefs.level}`);
-  if (!lines.length) return '';
-  return '\n\nPREFERÊNCIAS DO CANDIDATO (priorize vagas que atendam):\n' + lines.join('\n');
-}
+// buildPrefsBlock importado de utils/buildPrefsBlock.ts (shared com gemini.ts)
 
 function formatRepoContext(repos: RepoContext[]): string {
   return repos
@@ -80,7 +66,7 @@ function buildProfileSummary(profile: JobSearchRequest): string {
 
   if (profile.followers) lines.push(`Seguidores GitHub: ${profile.followers}`);
 
-  return lines.filter(Boolean).join('\n') + buildPreferencesSummary(profile.preferences);
+  return lines.filter(Boolean).join('\n') + buildPrefsBlock(profile.preferences);
 }
 
 // ── Multi-source deduplication ────────────────────────────────────

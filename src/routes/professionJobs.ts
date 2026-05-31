@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { findProfessionJobs, findJobsByQuery } from '../services/genericJobFinder';
-import { verifyLink } from '../services/linkVerifier';
+import { verifyLink, resolveJobLink } from '../services/linkVerifier';
 import { supabase } from '../services/supabase';
 import { CareerProfile, LinkedInData, UserPreferences } from '../types';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
@@ -29,10 +29,13 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     githubUsername?: string | null;
   };
 
+  // Certifications do LinkedIn — usadas para filtrar estágios quando usuário tem OAB
+  const certifications = linkedIn?.certifications ?? [];
+
   // ── Route A: text-query search (no LinkedIn required) ──
   if (query) {
     try {
-      const result = await findJobsByQuery(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
+      const result = await findJobsByQuery(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername, certifications, linkedIn);
 
       const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
 
@@ -43,22 +46,36 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       }
 
       const verifiedJobs = await Promise.all(
-        rawJobs.map(async (job) => ({
-          title: job.title ?? '',
-          company: job.company ?? '',
-          level: (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
-          remote: job.remote ?? false,
-          location: (job as { location?: string | null }).location ?? null,
-          skills: Array.isArray(job.tags) ? job.tags : [],
-          description: job.description ?? '',
-          salary: job.salary ?? null,
-          link: job.link || null,
-          match: typeof job.match === 'number' ? job.match : 0,
-          link_status: await verifyLink(job.link || null),
-          ...((job as { published_at?: string | null }).published_at
-            ? { published_at: (job as { published_at?: string | null }).published_at }
-            : {}),
-        }))
+        rawJobs.map(async (job) => {
+          const title   = job.title ?? '';
+          const company = job.company ?? '';
+          let link      = job.link || null;
+          let linkStatus = await verifyLink(link);
+
+          // Vaga expirada ou link inválido → substitui por busca no Indeed
+          // para que o usuário ainda consiga encontrar a oportunidade
+          if (linkStatus === 'dead' || linkStatus === 'none') {
+            link = resolveJobLink(null, title, company);
+            linkStatus = 'unverified';
+          }
+
+          return {
+            title,
+            company,
+            level: (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
+            remote: job.remote ?? false,
+            location: (job as { location?: string | null }).location ?? null,
+            skills: Array.isArray(job.tags) ? job.tags : [],
+            description: job.description ?? '',
+            salary: job.salary ?? null,
+            link,
+            match: typeof job.match === 'number' ? job.match : 0,
+            link_status: linkStatus,
+            ...((job as { published_at?: string | null }).published_at
+              ? { published_at: (job as { published_at?: string | null }).published_at }
+              : {}),
+          };
+        })
       );
 
       const skills = [...new Set(verifiedJobs.flatMap((j) => j.skills))].slice(0, 10);
@@ -118,22 +135,34 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     }
 
     const verifiedJobs = await Promise.all(
-      rawJobs.map(async (job) => ({
-        title: job.title ?? '',
-        company: job.company ?? '',
-        level: (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
-        remote: job.remote ?? false,
-        location: (job as { location?: string | null }).location ?? null,
-        skills: Array.isArray(job.tags) ? job.tags : [],
-        description: job.description ?? '',
-        salary: job.salary ?? null,
-        link: job.link || null,
-        match: typeof job.match === 'number' ? job.match : 0,
-        link_status: await verifyLink(job.link || null),
-        ...((job as { published_at?: string | null }).published_at
-          ? { published_at: (job as { published_at?: string | null }).published_at }
-          : {}),
-      }))
+      rawJobs.map(async (job) => {
+        const title   = job.title ?? '';
+        const company = job.company ?? '';
+        let link      = job.link || null;
+        let linkStatus = await verifyLink(link);
+
+        if (linkStatus === 'dead' || linkStatus === 'none') {
+          link = resolveJobLink(null, title, company);
+          linkStatus = 'unverified';
+        }
+
+        return {
+          title,
+          company,
+          level: (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
+          remote: job.remote ?? false,
+          location: (job as { location?: string | null }).location ?? null,
+          skills: Array.isArray(job.tags) ? job.tags : [],
+          description: job.description ?? '',
+          salary: job.salary ?? null,
+          link,
+          match: typeof job.match === 'number' ? job.match : 0,
+          link_status: linkStatus,
+          ...((job as { published_at?: string | null }).published_at
+            ? { published_at: (job as { published_at?: string | null }).published_at }
+            : {}),
+        };
+      })
     );
 
     const skills = [...new Set(verifiedJobs.flatMap((j) => j.skills))].slice(0, 10);

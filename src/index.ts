@@ -1,6 +1,7 @@
 import './env-setup'; // MUST be first — loads .env before any module reads process.env
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import jobsRouter from './routes/jobs';
 import searchesRouter from './routes/searches';
 import cvRouter from './routes/cv';
@@ -28,14 +29,33 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
+// ── Rate limiting ────────────────────────────────────────────────────
+// Rotas públicas pesadas (consomem créditos de IA) — 20 req/15min por IP
+const heavyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas requisições. Aguarde alguns minutos e tente novamente.' },
+});
+
+// Auth — 10 tentativas de login por 15min por IP (anti-brute-force)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Aguarde 15 minutos.' },
+});
+
 app.get('/health', (_req, res) => res.sendStatus(200));
 
-app.use('/auth', authRouter);
-app.use('/jobs', jobsRouter);
+app.use('/auth', authLimiter, authRouter);
+app.use('/jobs', heavyLimiter, jobsRouter);
 app.use('/searches', searchesRouter);
-app.use('/cv', cvRouter);
+app.use('/cv', heavyLimiter, cvRouter);
 app.use('/linkedin', linkedInRouter);
-app.use('/profession-jobs', professionJobsRouter);
+app.use('/profession-jobs', heavyLimiter, professionJobsRouter);
 app.use('/analyze-link', analyzeLinkRouter);
 app.use('/career', careerRouter);
 

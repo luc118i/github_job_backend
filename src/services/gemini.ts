@@ -1,9 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Job, JobSearchRequest, LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerChatMessage, CareerProfile } from '../types';
 import { resolveJobLink } from './linkVerifier';
+import { buildPrefsBlock } from '../utils/buildPrefsBlock';
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY ?? '');
 
+// Ferramenta de busca do Google — necessária para o Gemini acessar vagas em tempo real
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GOOGLE_SEARCH_TOOL: any = { googleSearch: {} };
 
@@ -14,7 +16,11 @@ function extractJson(text: string): unknown {
   if (!clean) throw new Error('Gemini retornou resposta vazia');
   const match = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!match) throw new Error('Gemini não retornou JSON válido');
-  return JSON.parse(match[0]);
+  try {
+    return JSON.parse(match[0]);
+  } catch (e) {
+    throw new Error(`Gemini retornou JSON malformado: ${(e as Error).message}`);
+  }
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -24,20 +30,6 @@ function isRetryableError(err: unknown): boolean {
   return msg.includes('vazia') || msg.includes('JSON válido') || msg.includes('JSON.parse') || msg.includes('Unexpected token');
 }
 
-function buildPrefsBlock(prefs: UserPreferences | undefined): string {
-  if (!prefs) return '';
-  const lines: string[] = [];
-  const modalityLabel: Record<string, string> = { remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '' };
-  if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
-  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
-  if (prefs.salaryMin || prefs.salaryMax) {
-    const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
-    lines.push(`Faixa salarial: ${range}`);
-  }
-  if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
-  if (prefs.maxAgeDays) lines.push(`Período máximo: ${prefs.maxAgeDays} dias`);
-  return lines.length ? '\n\nPREFERÊNCIAS (priorize):\n' + lines.join('\n') : '';
-}
 
 export async function findJobsGemini(profile: JobSearchRequest): Promise<Job[]> {
   const maxAge = profile.preferences?.maxAgeDays ?? 90;
@@ -64,7 +56,7 @@ Retorne APENAS um array JSON com 6 objetos (sem nenhum texto fora do JSON):
   "link": "URL real encontrada na pesquisa em Gupy/Indeed/Glassdoor/Catho/InfoJobs, ou string vazia se não encontrou"
 }]`;
 
-  let lastErr: unknown;
+  let lastErr: unknown = new Error('Gemini: todos os modelos falharam');
   for (const modelName of GEMINI_MODELS) {
     try {
       const model = genAI.getGenerativeModel({
@@ -145,7 +137,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
   }]
 }`;
 
-  let lastErr: unknown;
+  let lastErr: unknown = new Error('Gemini: todos os modelos falharam');
   for (const modelName of GEMINI_MODELS) {
     try {
       const model = genAI.getGenerativeModel({
@@ -201,7 +193,7 @@ Retorne APENAS este JSON (sem nenhum texto fora do JSON):
   }]
 }`;
 
-  let lastErr: unknown;
+  let lastErr: unknown = new Error('Gemini: todos os modelos falharam');
   for (const modelName of GEMINI_MODELS) {
     try {
       const model = genAI.getGenerativeModel({
@@ -252,7 +244,7 @@ export async function sendCareerMessageGemini(
 ): Promise<{ message?: string; profile?: CareerProfile; done: boolean }> {
   if (!messages.length) throw new Error('messages não pode ser vazio');
 
-  let lastErr: unknown;
+  let lastErr: unknown = new Error('Gemini: todos os modelos falharam');
   for (const modelName of GEMINI_MODELS) {
     try {
       const model = genAI.getGenerativeModel({
@@ -277,7 +269,14 @@ export async function sendCareerMessageGemini(
       const doneIdx = text.indexOf(PROFILE_DONE_MARKER);
       if (doneIdx !== -1) {
         const jsonStr = text.slice(doneIdx + PROFILE_DONE_MARKER.length).trim();
-        const profile = JSON.parse(jsonStr) as CareerProfile;
+        let profile: CareerProfile;
+        try {
+          profile = JSON.parse(jsonStr) as CareerProfile;
+        } catch {
+          // JSON malformado — continua sem perfil, trata como mensagem normal
+          console.warn('[career/gemini] perfil JSON malformado, ignorando marker');
+          return { done: false, message: text.slice(0, doneIdx).trim() || text };
+        }
         // Human-readable closing message before the marker
         const closingMsg = text.slice(0, doneIdx).trim();
         console.log(`[career/gemini] perfil finalizado via ${modelName}`);

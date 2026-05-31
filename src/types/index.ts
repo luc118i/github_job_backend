@@ -36,6 +36,10 @@ export interface UserPreferences {
   salaryMax: string;
   level: 'any' | 'Junior' | 'Pleno' | 'Senior';
   maxAgeDays?: number;
+  /** Raio de busca em km. 0 = Nacional (sem filtro geográfico). */
+  radiusKm?: number;
+  /** Quando true, exibe apenas vagas com título/descrição em português. */
+  ptBrOnly?: boolean;
 }
 
 export interface RepoContext {

@@ -17,7 +17,7 @@ Exemplos corretos:
 - Para "Como é sua experiência com liderança?" → [op: Nunca liderei | Liderei times pequenos | Tenho bastante experiência]
 Use 2 a 4 opcoes, máximo 5 palavras cada. Não use este marcador em mensagens que não sejam perguntas.`;
 
-const SYSTEM_PROMPT = `Você é um consultor de carreira especialista em desenvolvimento humano e transição profissional. Seu objetivo é entender o potencial real do usuário além do currículo.
+const BASE_SYSTEM_PROMPT = `Você é um consultor de carreira especialista em desenvolvimento humano e transição profissional. Seu objetivo é entender o potencial real do usuário além do currículo.
 
 Conduza uma conversa breve, empática e direta em português. Faça UMA pergunta por vez. Respostas curtas, máximo 2 frases. Sem listas, sem marcadores, sem formatação markdown.
 
@@ -26,17 +26,59 @@ Regras para as perguntas:
 - Prefira perguntas com opções claras: "X ou Y?" quando fizer sentido
 - Nunca presuma que a pessoa quer mudar de área — descubra isso primeiro
 - Adapte o tom com base nas respostas anteriores
+- Se o usuário já tem contexto de carreira (informado abaixo), use para personalizar as perguntas — não pergunte o que já está claro no currículo
 
-Siga esta sequência de temas (adapte com base nas respostas, mas cubra todos):
+Siga esta sequência de temas (adapte com base nas respostas e no contexto disponível, mas cubra todos):
 1. Se está satisfeito na área atual ou quer explorar algo diferente — isso define tudo o que vem depois
 2. Habilidades e capacidades que o currículo não mostra bem
 3. Se quer mudar: qual área ou função deseja, mesmo sem experiência formal. Se não quer: o que busca na próxima oportunidade
 4. Áreas ou tipos de trabalho que definitivamente não quer mais fazer
-5. Estilo de trabalho: analítico (dados/problemas), criativo (inovação/design), operacional (processos/execução) ou relacional (pessoas/comunicação) — pode ser mais de um
+5. Estilo de trabalho: analítico (dados/problemas), criativo (inovação/design), operacional (processos/execução) ou relacional (pessoas/comunicação) — pode ser mais de um. IMPORTANTE: ao chamar analyze_profile, use EXATAMENTE os valores em inglês: "analytical", "creative", "operational", "relational"
 6. Experiências de liderança, mesmo informais
 7. Nível de conforto com tecnologia e ferramentas digitais
 
-Após cobrir os 7 temas (geralmente 7 a 10 trocas), chame analyze_profile para estruturar o perfil. Não avise que vai chamar a função — apenas chame.${OPTIONS_INSTRUCTION}`;
+Após cobrir os 7 temas (geralmente 7 a 10 trocas), chame analyze_profile para estruturar o perfil. Não avise que vai chamar a função — apenas chame.
+
+REGRA CRÍTICA para analyze_profile: workStyle aceita SOMENTE estes valores em inglês: "analytical", "creative", "operational", "relational". Nunca use versões em português como "analítico", "criativo", "operacional", "relacional" — isso causa erro.`;
+
+/** Monta o bloco de contexto do usuário a partir dos dados do LinkedIn */
+function buildUserContext(linkedIn: LinkedInData): string {
+  const lines: string[] = ['\n\nCONTEXTO DO USUÁRIO (use para personalizar a conversa):'];
+
+  if (linkedIn.name) lines.push(`Nome: ${linkedIn.name}`);
+
+  if (linkedIn.positions?.length) {
+    const recent = linkedIn.positions.slice(0, 3);
+    lines.push('Experiência profissional:');
+    recent.forEach((p) => {
+      const period = p.finishedOn ? `${p.startedOn}–${p.finishedOn}` : `${p.startedOn}–atual`;
+      lines.push(`  - ${p.title} na ${p.company} (${period})`);
+    });
+  }
+
+  if (linkedIn.education?.length) {
+    lines.push('Formação:');
+    linkedIn.education.slice(0, 2).forEach((e) => {
+      lines.push(`  - ${e.degree ?? 'Curso'} em ${e.school}`);
+    });
+  }
+
+  if (linkedIn.certifications?.length) {
+    lines.push('Certificações/habilitações:');
+    linkedIn.certifications.slice(0, 3).forEach((c) => {
+      lines.push(`  - ${c.name}${c.authority ? ` (${c.authority})` : ''}`);
+    });
+  }
+
+  lines.push('\nCom esse contexto, comece identificando a área principal do usuário e faça a primeira pergunta de forma personalizada — por exemplo: "Vi que você atua como [cargo] na área de [área]. Está satisfeito com esse caminho ou quer explorar algo diferente?"');
+
+  return lines.join('\n');
+}
+
+function buildInitialSystemPrompt(linkedIn?: LinkedInData | null): string {
+  const context = linkedIn ? buildUserContext(linkedIn) : '';
+  return BASE_SYSTEM_PROMPT + context + OPTIONS_INSTRUCTION;
+}
 
 // Strips [op: X | Y | Z] from the message and returns the options list
 const OPTIONS_REGEX = /\[op:\s*([^\]]+)\]\s*$/;
@@ -101,10 +143,10 @@ Regras:
 }
 
 // POST /career/message
-// Body: { messages: CareerChatMessage[] }
+// Body: { messages: CareerChatMessage[], linkedIn?: LinkedInData }
 // Returns: { message?: string, profile?: CareerProfile, done: boolean }
 router.post('/message', async (req: AuthRequest, res: Response) => {
-  const { messages } = req.body as { messages: CareerChatMessage[] };
+  const { messages, linkedIn } = req.body as { messages: CareerChatMessage[]; linkedIn?: LinkedInData };
 
   if (!Array.isArray(messages)) {
     res.status(400).json({ error: 'messages inválido' });
@@ -112,7 +154,8 @@ router.post('/message', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const result = await sendCareerMessageGroq(messages, SYSTEM_PROMPT);
+    const systemPrompt = buildInitialSystemPrompt(linkedIn);
+    const result = await sendCareerMessageGroq(messages, systemPrompt);
     if (result.done && result.profile) {
       res.json({ profile: result.profile, done: true });
       return;

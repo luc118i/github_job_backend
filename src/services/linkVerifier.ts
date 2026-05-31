@@ -1,7 +1,6 @@
 import { LinkStatus } from '../types';
 
 const TRUSTED_DOMAINS = new Set([
-  // Job boards nacionais
   'gupy.io',
   'catho.com.br',
   'infojobs.com.br',
@@ -16,7 +15,6 @@ const TRUSTED_DOMAINS = new Set([
   'hipsters.jobs',
   'remotar.com.br',
   'kenoby.com',
-  // Job boards internacionais
   'indeed.com',
   'glassdoor.com',
   'glassdoor.com.br',
@@ -27,10 +25,8 @@ const TRUSTED_DOMAINS = new Set([
   'stackoverflow.com',
   'adzuna.com',
   'adzuna.com.br',
-  // Plataformas jurídicas brasileiras
   'jusbrasil.com.br',
   'conjur.com.br',
-  // ATS / sistemas de candidatura
   'lever.co',
   'greenhouse.io',
   'workable.com',
@@ -38,12 +34,27 @@ const TRUSTED_DOMAINS = new Set([
   'bamboohr.com',
   'smartrecruiters.com',
   'ashbyhq.com',
-  // Redes sociais (posts públicos de vagas)
   'twitter.com',
   'x.com',
   'facebook.com',
   'instagram.com',
 ]);
+
+// Domínios onde vagas expiradas retornam 200 com conteúdo indicando encerramento.
+// Para esses, fazemos GET parcial além do HEAD.
+const CONTENT_CHECK_DOMAINS = new Set(['gupy.io']);
+
+// Strings que indicam vaga fechada no HTML da página
+const CLOSED_PATTERNS = [
+  /candidaturas?\s+encerradas?/i,
+  /inscri[çc][õo]es?\s+encerradas?/i,
+  /vaga\s+encerrada/i,
+  /esta\s+vaga\s+(não\s+está\s+mais\s+dispon|foi\s+encerrada)/i,
+  /job\s+is\s+no\s+longer\s+available/i,
+  /position\s+has\s+been\s+filled/i,
+  /this\s+job\s+is\s+not\s+available/i,
+  /processo\s+seletivo\s+encerrado/i,
+];
 
 const SEARCH_RESULT_PATTERNS = [
   /[?&](q|query|search|busca|keyword|s)=/i,
@@ -69,7 +80,14 @@ function isTrusted(hostname: string): boolean {
   return false;
 }
 
-// Rejeita URLs sem path significativo (home da plataforma)
+function needsContentCheck(hostname: string): boolean {
+  const clean = hostname.replace(/^www\./, '');
+  for (const domain of CONTENT_CHECK_DOMAINS) {
+    if (clean === domain || clean.endsWith(`.${domain}`)) return true;
+  }
+  return false;
+}
+
 function isHomepage(url: string): boolean {
   try {
     const { pathname } = new URL(url);
@@ -79,11 +97,6 @@ function isHomepage(url: string): boolean {
   }
 }
 
-// Detecta páginas de categoria/listagem de plataformas conhecidas que a IA costuma gerar
-// em vez de links de vagas específicas.
-// Catho: /vagas/[keyword]/ (2 segmentos, sem número) = categoria
-//        /vagas/emprego/[slug-com-id]/ (3 seg + número) = vaga real
-// Indeed: /m/basecamp?... ou /rc/clk?... = redirect genérico
 function isPlatformCategoryPage(url: string): boolean {
   try {
     const { hostname, pathname } = new URL(url);
@@ -91,20 +104,14 @@ function isPlatformCategoryPage(url: string): boolean {
     const segs = pathname.split('/').filter(Boolean);
 
     if (host.endsWith('catho.com.br')) {
-      // /vagas ou /vagas/[keyword-sem-numero] = categoria, não vaga
       if (segs[0] === 'vagas' && segs.length <= 2 && !/\d/.test(segs[1] ?? '')) return true;
     }
-
     if (host.endsWith('indeed.com') || host.endsWith('indeed.com.br')) {
-      // /rc/clk, /m/basecamp etc = redirects genéricos, não vagas
       if (/^\/(rc|m|l|cmp)\//.test(pathname)) return true;
     }
-
     if (host.endsWith('glassdoor.com') || host.endsWith('glassdoor.com.br')) {
-      // /Jobs/ sem ID numérico no path = listagem de categoria
       if (/\/Jobs\/[^?#]*$/.test(pathname) && !/[A-Z]{2}\d{3,}/.test(pathname)) return true;
     }
-
     return false;
   } catch {
     return false;
@@ -115,8 +122,6 @@ export function resolveJobLink(aiLink: string | null | undefined, title: string,
   if (aiLink) {
     try {
       const { hostname } = new URL(aiLink);
-      // Aceita apenas URLs de domínio confiável que apontem para uma vaga específica —
-      // rejeita homepages, páginas de busca e páginas de categoria
       if (
         isTrusted(hostname) &&
         !isHomepage(aiLink) &&
@@ -126,12 +131,34 @@ export function resolveJobLink(aiLink: string | null | undefined, title: string,
         return aiLink;
       }
     } catch {
-      // URL inválida, ignora
+      // URL inválida
     }
   }
-  // Fallback: busca pelo título + empresa no Indeed
-  const q = encodeURIComponent(`${title} ${company}`.trim());
+  // Sanitiza title/company removendo caracteres que podem quebrar a URL
+  const safeTitle = (title ?? '').replace(/[^\w\s\-áàãâéêíóôõúüçÁÀÃÂÉÊÍÓÔÕÚÜÇ]/g, ' ').trim();
+  const safeCompany = (company ?? '').replace(/[^\w\s\-áàãâéêíóôõúüçÁÀÃÂÉÊÍÓÔÕÚÜÇ]/g, ' ').trim();
+  const q = encodeURIComponent(`${safeTitle} ${safeCompany}`.trim());
   return `https://br.indeed.com/jobs?q=${q}&l=Brasil`;
+}
+
+/** Verifica se o HTML da página indica vaga encerrada */
+async function isClosedContent(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Range': 'bytes=0-12000', // só os primeiros 12KB — suficiente para o título/status
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (res.status === 404) return true;
+    const text = await res.text();
+    return CLOSED_PATTERNS.some((re) => re.test(text));
+  } catch {
+    return false; // timeout ou erro → assume ativa (melhor falso negativo que falso positivo)
+  }
 }
 
 export async function verifyLink(url: string | null): Promise<LinkStatus> {
@@ -149,12 +176,16 @@ export async function verifyLink(url: string | null): Promise<LinkStatus> {
   const hostname = parsed.hostname;
 
   if (isSuspicious(hostname)) return 'none';
-  if (isTrusted(hostname)) return 'trusted';   // trusted antes de isSearchResultPage para aceitar URLs de busca em plataformas confiáveis
   if (isSearchResultPage(url)) return 'none';
 
+  const trusted = isTrusted(hostname);
+  const contentCheck = needsContentCheck(hostname);
+  const timeout = trusted ? 5000 : 6000;
+
   try {
+    // HEAD rápido primeiro
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 6000);
+    const tid = setTimeout(() => controller.abort(), timeout);
     const res = await fetch(url, {
       method: 'HEAD',
       signal: controller.signal,
@@ -162,10 +193,26 @@ export async function verifyLink(url: string | null): Promise<LinkStatus> {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobFinder/1.0)' },
     });
     clearTimeout(tid);
-    // 403/429 = site bloqueia bots mas o link existe; 405 = HEAD não suportado mas link existe
-    const liveStatuses = [403, 405, 429];
-    return res.status < 400 || liveStatuses.includes(res.status) ? 'unverified' : 'dead';
+
+    // 404/410 = definitivamente morto
+    if (res.status === 404 || res.status === 410) return 'dead';
+
+    // Outros erros de servidor
+    if (res.status >= 500) return 'dead';
+
+    // 403/405/429 = site bloqueia bots mas link existe
+    const botBlock = [403, 405, 429];
+    if (!botBlock.includes(res.status) && res.status >= 400) return 'dead';
+
+    // Para domínios como Gupy: fazer GET parcial para detectar "candidaturas encerradas"
+    if (contentCheck) {
+      const closed = await isClosedContent(url);
+      if (closed) return 'dead';
+    }
+
+    return trusted ? 'trusted' : 'unverified';
   } catch {
-    return 'dead';
+    // Timeout ou erro de rede
+    return trusted ? 'trusted' : 'dead';
   }
 }
