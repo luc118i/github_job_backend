@@ -148,9 +148,36 @@ export interface CvRequest {
   };
 }
 
+// ── CV em blocos (Career Studio M1) ───────────────────────────────
+// Modelo nativo do editor: cada seção do currículo é um bloco
+// independente (mover/editar/ocultar/duplicar/excluir). Tudo a jusante
+// (ATS, Adaptar p/ vaga, versionamento, portfólio) lê/escreve estes
+// blocos — por isso o JSON é a fonte da verdade, e o Markdown é derivado.
+export type CvBlockType =
+  | 'resumo'
+  | 'skills'
+  | 'experiencia'
+  | 'projetos'
+  | 'formacao'
+  | 'certificacoes'
+  | 'idiomas';
+
+export interface CvBlock {
+  id: string;
+  type: CvBlockType;
+  /** Título exibido da seção, ex: "RESUMO PROFISSIONAL". */
+  title: string;
+  /** Corpo em Markdown (parágrafo ou bullets "- "). */
+  content: string;
+  /** Oculto não entra no Markdown derivado nem no PDF. */
+  visible: boolean;
+}
+
 export interface CvResponse {
   cvId: string;
+  /** Markdown derivado dos blocos visíveis (PDF / retrocompat). */
   content: string;
+  blocks: CvBlock[];
 }
 
 // ── Career Profile ─────────────────────────────────────────────────

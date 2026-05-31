@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { generateCv } from '../services/cvGenerator';
-import { CvRequest } from '../types';
+import { CvRequest, CvBlock } from '../types';
 import { supabase } from '../services/supabase';
 
 const router = Router();
@@ -20,10 +20,21 @@ function getRetryAfterSeconds(err: unknown): number | null {
 router.post('/', async (req: Request, res: Response) => {
   const body = req.body as CvRequest;
 
-  if (!body?.job?.id || !body?.candidate?.name) {
+  // Valida campos obrigatórios e estrutura aninhada
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    !body.job?.id ||
+    typeof body.job.title !== 'string' ||
+    !body.candidate?.name ||
+    typeof body.candidate.name !== 'string'
+  ) {
     res.status(400).json({ error: 'Dados insuficientes para gerar o CV. Informe a vaga e o nome do candidato.' });
     return;
   }
+
+  // Garante que repos é sempre array (evita crash no cvGenerator)
+  if (!Array.isArray(body.candidate.repos)) body.candidate.repos = [];
 
   try {
     const result = await generateCv(body);
@@ -47,7 +58,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/job/:jobId', async (req: Request, res: Response) => {
   const { data, error } = await supabase
     .from('cvs')
-    .select('id, content')
+    .select('id, content, content_blocks')
     .eq('job_id', req.params.jobId)
     .limit(1)
     .maybeSingle();
@@ -60,14 +71,18 @@ router.get('/job/:jobId', async (req: Request, res: Response) => {
 });
 
 router.patch('/:id', async (req: Request, res: Response) => {
-  const { content } = req.body as { content?: string };
+  const { content, blocks } = req.body as { content?: string; blocks?: CvBlock[] };
   if (!content) {
     res.status(400).json({ error: 'O conteúdo do CV é obrigatório' });
     return;
   }
+  // Salva o Markdown derivado e, quando o front mandar, os blocos editados.
+  const patch: { content: string; content_blocks?: CvBlock[] } = { content };
+  if (Array.isArray(blocks)) patch.content_blocks = blocks;
+
   const { error } = await supabase
     .from('cvs')
-    .update({ content })
+    .update(patch)
     .eq('id', req.params.id);
 
   if (error) {
