@@ -278,5 +278,14 @@ export async function generateCv(req: CvRequest): Promise<CvResponse> {
 
   if (error) throw new Error(error.message);
 
-  return { cvId: data.id as string, content, blocks };
+  const cvId = data.id as string;
+
+  // M2: registra a versão inicial automaticamente (histórico começa aqui).
+  // Best-effort: se a tabela ainda não existir, não derruba a geração do CV.
+  const { error: vErr } = await supabase
+    .from('cv_versions')
+    .insert({ cv_id: cvId, content, content_blocks: blocks, label: 'Versão inicial', source: 'initial' });
+  if (vErr) console.warn(`[cv] falha ao salvar versão inicial: ${vErr.message}`);
+
+  return { cvId, content, blocks };
 }

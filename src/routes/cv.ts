@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { generateCv } from '../services/cvGenerator';
-import { CvRequest, CvBlock } from '../types';
+import { CvRequest, CvBlock, CvVersionSource } from '../types';
 import { supabase } from '../services/supabase';
 
 const router = Router();
@@ -90,6 +90,56 @@ router.patch('/:id', async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true });
+});
+
+// ── Versionamento (Career Studio M2) ──────────────────────────────
+
+// Snapshot da versão atual do CV. O front envia o estado atual
+// (content + blocks) para evitar corrida com um PATCH simultâneo.
+router.post('/:id/versions', async (req: Request, res: Response) => {
+  const { content, blocks, label, source } = req.body as {
+    content?: string;
+    blocks?: CvBlock[];
+    label?: string;
+    source?: CvVersionSource;
+  };
+  if (!content) {
+    res.status(400).json({ error: 'O conteúdo do CV é obrigatório' });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('cv_versions')
+    .insert({
+      cv_id: req.params.id,
+      content,
+      content_blocks: Array.isArray(blocks) ? blocks : null,
+      label: label?.trim() || 'Versão',
+      source: source ?? 'manual',
+    })
+    .select('id, label, source, created_at')
+    .single();
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.status(201).json(data);
+});
+
+// Histórico de versões (mais recentes primeiro).
+router.get('/:id/versions', async (req: Request, res: Response) => {
+  const { data, error } = await supabase
+    .from('cv_versions')
+    .select('id, cv_id, content, content_blocks, label, source, created_at')
+    .eq('cv_id', req.params.id)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json(data ?? []);
 });
 
 export default router;

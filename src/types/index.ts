@@ -180,6 +180,19 @@ export interface CvResponse {
   blocks: CvBlock[];
 }
 
+// Origem de uma versão do currículo (Career Studio M2).
+export type CvVersionSource = 'initial' | 'manual' | 'adapted';
+
+export interface CvVersion {
+  id: string;
+  cv_id: string;
+  content: string;
+  content_blocks: CvBlock[] | null;
+  label: string;
+  source: CvVersionSource;
+  created_at: string;
+}
+
 // ── Career Profile ─────────────────────────────────────────────────
 
 export type WorkStyle = 'analytical' | 'creative' | 'operational' | 'relational';
