@@ -186,10 +186,12 @@ function blocksToMarkdown(req: CvRequest, blocks: CvBlock[]): string {
   return `${header}\n\n${body}`.trim();
 }
 
-async function generateCvGroq(req: CvRequest): Promise<CvBlock[]> {
+// Loop de modelos Groq → blocos. Genérico: serve tanto para gerar (buildPrompt)
+// quanto para adaptar (buildAdaptPrompt) o currículo.
+async function groqBlocks(userPrompt: string): Promise<CvBlock[]> {
   const messages: Groq.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: buildPrompt(req) },
+    { role: 'user', content: userPrompt },
   ];
 
   let lastErr: unknown;
@@ -228,7 +230,8 @@ async function generateCvGroq(req: CvRequest): Promise<CvBlock[]> {
 
 const GEMINI_CV_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
-async function generateCvGemini(req: CvRequest): Promise<CvBlock[]> {
+// Fallback: mesmo contrato de groqBlocks, via Gemini.
+async function geminiBlocks(userPrompt: string): Promise<CvBlock[]> {
   let lastErr: unknown;
   for (const modelName of GEMINI_CV_MODELS) {
     try {
@@ -237,7 +240,7 @@ async function generateCvGemini(req: CvRequest): Promise<CvBlock[]> {
         systemInstruction: SYSTEM_PROMPT,
         generationConfig: { responseMimeType: 'application/json' },
       });
-      const result = await model.generateContent(buildPrompt(req));
+      const result = await model.generateContent(userPrompt);
       return parseBlocks(result.response.text());
     } catch (err) {
       const status = (err as { status?: number }).status;
@@ -256,16 +259,18 @@ async function generateCvGemini(req: CvRequest): Promise<CvBlock[]> {
   throw lastErr;
 }
 
-export async function generateCv(req: CvRequest): Promise<CvResponse> {
-  let blocks: CvBlock[];
-
-  // Motor primário: Groq. Se todos os modelos Groq falharem, cai pro Gemini.
+// Motor primário Groq → fallback Gemini, ambos devolvendo blocos.
+async function runBlocks(userPrompt: string): Promise<CvBlock[]> {
   try {
-    blocks = await generateCvGroq(req);
+    return await groqBlocks(userPrompt);
   } catch (err) {
     console.warn(`[cv] Groq indisponível (${(err as Error).message}), caindo pro Gemini...`);
-    blocks = await generateCvGemini(req);
+    return geminiBlocks(userPrompt);
   }
+}
+
+export async function generateCv(req: CvRequest): Promise<CvResponse> {
+  const blocks = await runBlocks(buildPrompt(req));
 
   // Markdown derivado dos blocos — fonte para PDF e retrocompatibilidade.
   const content = blocksToMarkdown(req, blocks);
@@ -288,4 +293,53 @@ export async function generateCv(req: CvRequest): Promise<CvResponse> {
   if (vErr) console.warn(`[cv] falha ao salvar versão inicial: ${vErr.message}`);
 
   return { cvId, content, blocks };
+}
+
+// ── Adaptar para vaga (Career Studio M4) ──────────────────────────
+
+type AdaptJob = CvRequest['job'];
+
+function buildAdaptPrompt(blocks: CvBlock[], job: AdaptJob): string {
+  const shortDesc = job.description.length > 700 ? job.description.slice(0, 700) + '...' : job.description;
+  // Envia só os blocos visíveis (ocultos não são reescritos).
+  const current = blocks
+    .filter((b) => b.visible)
+    .map((b) => ({ type: b.type, title: b.title, content: b.content }));
+
+  return `Você recebe um currículo em blocos e uma vaga. Reescreva o CONTEÚDO de cada bloco para maximizar a compatibilidade com a vaga em sistemas ATS, inserindo as palavras-chave da vaga de forma natural.
+
+REGRAS CRÍTICAS:
+- NUNCA invente experiências, empresas, cursos, tecnologias ou números que não estejam no currículo atual.
+- Mantenha EXATAMENTE os mesmos blocos: mesmo "type", mesmo "title" e a MESMA ORDEM.
+- Pode reescrever frases, reordenar bullets e enfatizar o que casa com a vaga.
+- Use verbos de ação no início dos bullets.
+- Priorize incluir, quando fizer sentido com a experiência real, estas palavras-chave: ${job.skills.join(', ')}.
+- Sem emojis, sem tabelas. Retorne APENAS JSON {"blocks":[{"type","title","content"}]}.
+
+VAGA: ${job.title} | ${job.level} | ${job.remote ? 'Remoto' : 'Presencial'}
+Skills da vaga: ${job.skills.join(', ')}
+Descrição: ${shortDesc}
+
+CURRÍCULO ATUAL (JSON):
+${JSON.stringify({ blocks: current })}`;
+}
+
+/**
+ * Reescreve os blocos visíveis mirando a vaga. Preserva id/visible/ordem dos
+ * blocos originais (faz o "zip" por posição); blocos ocultos passam intactos.
+ * NÃO persiste — o front mostra o split view e só salva se o usuário aceitar.
+ */
+export async function adaptCv(blocks: CvBlock[], job: AdaptJob): Promise<CvBlock[]> {
+  const optimized = await runBlocks(buildAdaptPrompt(blocks, job));
+
+  const visible = blocks.filter((b) => b.visible);
+  // Sem correspondência 1:1 → devolve o que a IA gerou (ids novos do parseBlocks).
+  if (optimized.length !== visible.length) return optimized;
+
+  let oi = 0;
+  return blocks.map((b) => {
+    if (!b.visible) return b; // oculto: intacto
+    const opt = optimized[oi++];
+    return { ...b, title: opt.title || b.title, content: opt.content };
+  });
 }

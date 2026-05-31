@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { generateCv } from '../services/cvGenerator';
+import { generateCv, adaptCv } from '../services/cvGenerator';
 import { CvRequest, CvBlock, CvVersionSource } from '../types';
 import { supabase } from '../services/supabase';
 
@@ -125,6 +125,28 @@ router.post('/:id/versions', async (req: Request, res: Response) => {
     return;
   }
   res.status(201).json(data);
+});
+
+// Adapta os blocos do CV para uma vaga (Career Studio M4). Não persiste:
+// devolve a versão otimizada para o front mostrar o split view.
+router.post('/:id/adapt', async (req: Request, res: Response) => {
+  const { blocks, job } = req.body as { blocks?: CvBlock[]; job?: CvRequest['job'] };
+  if (!Array.isArray(blocks) || blocks.length === 0 || !job?.title) {
+    res.status(400).json({ error: 'Envie os blocos do currículo e a vaga.' });
+    return;
+  }
+  try {
+    const optimized = await adaptCv(blocks, job);
+    res.json({ blocks: optimized });
+  } catch (err) {
+    console.error('Error adapting CV:', err);
+    const msg = err instanceof Error ? err.message.toLowerCase() : '';
+    if (msg.includes('quota') || msg.includes('429') || msg.includes('rate')) {
+      res.status(503).json({ error: 'Limite de requisições atingido. Tente novamente em instantes.' });
+    } else {
+      res.status(500).json({ error: 'Erro ao adaptar o currículo. Tente novamente.' });
+    }
+  }
 });
 
 // Histórico de versões (mais recentes primeiro).
