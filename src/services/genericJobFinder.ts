@@ -209,12 +209,14 @@ async function fetchGithubData(username: string): Promise<GithubData> {
 
 /** Pre-fetches jobs from Remotive + Gupy.
  *  Priority: career target > desired areas > current LinkedIn title.
- *  This prevents searching for the "old" role when the candidate wants to change areas. */
+ *  This prevents searching for the "old" role when the candidate wants to change areas.
+ *  @param excludeIntern - when true, removes estágio/trainee jobs before sending to AI */
 async function prefetchDirectJobs(
   positions: LinkedInPosition[],
   preferences?: UserPreferences,
   blockedSources?: string[],
   careerProfile?: CareerProfile,
+  excludeIntern = false,
 ): Promise<string> {
   let queries: string[];
 
@@ -235,7 +237,8 @@ async function prefetchDirectJobs(
     blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  const jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  let jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  if (excludeIntern) jobs = jobs.filter((j) => !isInternJob(j.title));
   if (!jobs.length) return '';
 
   const list = jobs
@@ -345,7 +348,7 @@ async function findProfessionJobsClaude(
 
   // Pre-fetch jobs (Remotive + Gupy) and GitHub data in parallel
   const [directJobsBlock, githubData] = await Promise.all([
-    lawProfile ? Promise.resolve('') : prefetchDirectJobs(positions, effectivePreferences, blockedSources, careerProfile),
+    lawProfile ? Promise.resolve('') : prefetchDirectJobs(positions, effectivePreferences, blockedSources, careerProfile, userHasOABInClaude),
     githubUsername ? fetchGithubData(githubUsername) : Promise.resolve(EMPTY_GITHUB),
   ]);
 
@@ -386,7 +389,7 @@ async function findProfessionJobsClaude(
           role: 'user',
           content: `${userCtx.isBrazilian ? 'CONTEXTO: Candidato brasileiro — busque vagas em português do Brasil, priorize plataformas nacionais (Gupy, Catho, InfoJobs, Programathor, Trampos.co, 99jobs).\n' : ''}Pesquise o máximo de ${searchTarget} reais publicadas nos últimos ${maxAge} dias em: ${platformNote}. NÃO use links do LinkedIn. Inclua a URL real de cada vaga.${isTransition ? `\nATENÇÃO: O candidato está MIGRANDO para ${careerProfile!.transitionTarget}. Busque SOMENTE vagas de ${careerProfile!.transitionTarget}. NÃO busque vagas das áreas anteriores.` : ''}${specialtiesNote}${directJobsBlock}
 
-${profileSection}${buildProfessionPrefsBlock(effectivePreferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
+${profileSection}${buildProfessionPrefsBlock(effectivePreferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABInClaude ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
 
 Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade. Para cada vaga, preencha published_at com a data de publicação quando visível na listagem (formato YYYY-MM-DD).`,
         },
@@ -473,6 +476,7 @@ async function prefetchDirectJobsByQuery(
   query: string,
   preferences?: UserPreferences,
   blockedSources?: string[],
+  excludeIntern = false,
 ): Promise<string> {
   const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
   const queries = [query];
@@ -483,7 +487,8 @@ async function prefetchDirectJobsByQuery(
     blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  const jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  let jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  if (excludeIntern) jobs = jobs.filter((j) => !isInternJob(j.title));
   if (!jobs.length) return '';
 
   const list = jobs
@@ -508,7 +513,6 @@ async function findJobsByQueryClaude(
   careerProfile?: CareerProfile,
   linkedIn?: { positions?: LinkedInPosition[]; education?: LinkedInEducation[]; certifications?: LinkedInCertification[] } | null,
 ): Promise<ProfessionSearchResult | null> {
-  const directJobsBlock = await prefetchDirectJobsByQuery(query, preferences, blockedSources);
   const maxAge = preferences?.maxAgeDays ?? 90;
 
   // Merge feedback blocked + career blocked into one list for the system prompt
@@ -518,6 +522,9 @@ async function findJobsByQueryClaude(
   ];
   const allBlockedInPrompt = expandBlockedTerms(allBlockedRaw);
   const userHasOABQuery = hasOAB(linkedIn?.certifications ?? [], linkedIn?.positions);
+
+  // Pre-fetch após calcular userHasOABQuery para poder filtrar intern jobs já na seed
+  const directJobsBlock = await prefetchDirectJobsByQuery(query, preferences, blockedSources, userHasOABQuery);
   const internBlock = userHasOABQuery ? ' NÃO inclua vagas de estágio, trainee ou jovem aprendiz — o candidato tem OAB e está habilitado a exercer advocacia.' : '';
   const blockedNote = allBlockedInPrompt.length
     ? ` NÃO inclua vagas nestas categorias, cargos ou áreas (incluindo sinônimos e subcategorias): ${allBlockedInPrompt.join(', ')}.${internBlock}`
@@ -544,7 +551,7 @@ async function findJobsByQueryClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}
+          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(preferences)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABQuery ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
 
 Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Para cada vaga, preencha published_at com a data de publicação quando estiver visível (formato YYYY-MM-DD).`,
         },
