@@ -1,11 +1,24 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CvRequest, CvResponse, LinkedInPosition, LinkedInEducation } from '../types';
 import { supabase } from './supabase';
 
 const geminiClient = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Lazy init — evita instanciar antes do .env ser carregado (mesmo padrão de groq.ts)
+let _groq: Groq | null = null;
+function getGroq(): Groq {
+  if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return _groq;
+}
+
+// Motor primário: Groq (modelos abertos, rápidos e baratos). Fallback entre modelos
+// na mesma ordem usada no career chat, caso algum seja descontinuado/indisponível.
+const GROQ_CV_MODELS = [
+  'llama-3.3-70b-versatile',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
+];
 
 const SYSTEM_PROMPT = `Você é um especialista em RH e otimização de currículos para ATS (Applicant Tracking System).
 Gere currículos que:
@@ -112,20 +125,42 @@ ${contactLine}
 Regras: nunca invente dados; bullet points com verbos de ação; sem tabelas.`;
 }
 
-async function generateCvClaude(req: CvRequest): Promise<string> {
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2048,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildPrompt(req) }],
-  });
+async function generateCvGroq(req: CvRequest): Promise<string> {
+  const messages: Groq.Chat.ChatCompletionMessageParam[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: buildPrompt(req) },
+  ];
 
-  const raw = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
+  let lastErr: unknown;
+  for (const model of GROQ_CV_MODELS) {
+    try {
+      const response = await getGroq().chat.completions.create({
+        model,
+        max_tokens: 2048,
+        messages,
+      });
 
-  return stripEmojis(raw);
+      const raw = response.choices[0]?.message.content ?? '';
+      if (!raw.trim()) throw new Error('Groq retornou CV vazio');
+
+      return stripEmojis(raw);
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      const status = (err as { status?: number }).status;
+      const code = (err as { error?: { error?: { code?: string } } }).error?.error?.code ?? '';
+      const retryable =
+        status === 429 || status === 503 || status === 404 ||
+        code === 'model_decommissioned' || code === 'model_not_found' ||
+        msg.includes('vazio');
+      if (retryable) {
+        console.warn(`[cv/groq] ${model} falhou (${msg}), tentando próximo modelo...`);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 const GEMINI_CV_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
@@ -156,15 +191,12 @@ async function generateCvGemini(req: CvRequest): Promise<string> {
 export async function generateCv(req: CvRequest): Promise<CvResponse> {
   let content: string;
 
+  // Motor primário: Groq. Se todos os modelos Groq falharem, cai pro Gemini.
   try {
-    content = await generateCvClaude(req);
+    content = await generateCvGroq(req);
   } catch (err) {
-    if (err instanceof Anthropic.APIError) {
-      console.warn(`[cv] Claude API error (${err.status}), switching to Gemini...`);
-      content = await generateCvGemini(req);
-    } else {
-      throw err;
-    }
+    console.warn(`[cv] Groq indisponível (${(err as Error).message}), caindo pro Gemini...`);
+    content = await generateCvGemini(req);
   }
 
   const { data, error } = await supabase
