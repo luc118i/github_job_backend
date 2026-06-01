@@ -196,6 +196,9 @@ export interface CvVersion {
 // ── Biblioteca de Projetos (Career Studio M5) ─────────────────────
 // Coleção curada de projetos do usuário. Reusada nos CVs e ranqueada
 // por relevância à vaga via match determinístico (sem IA/embeddings).
+// Categoria do projeto — base dos filtros do print (Frontend/Backend/etc).
+export type ProjectCategory = 'frontend' | 'backend' | 'fullstack' | 'data' | 'mobile' | 'outro';
+
 export interface Project {
   id: string;
   user_id: string;
@@ -206,8 +209,10 @@ export interface Project {
   tech: string[];
   /** Conquistas/destaques em bullets (entram no bloco "projetos"). */
   highlights: string[];
+  /** Categoria para os filtros (inferida do repo ou definida pelo usuário). */
+  category: ProjectCategory;
   link: string | null;
-  /** Repositório GitHub de origem, quando importado. */
+  /** Repositório GitHub de origem, quando importado (chave de dedupe). */
   repo: string | null;
   created_at: string;
   updated_at: string;
@@ -219,8 +224,62 @@ export interface ProjectInput {
   description?: string;
   tech?: string[];
   highlights?: string[];
+  category?: ProjectCategory;
   link?: string | null;
   repo?: string | null;
+}
+
+// ── Cartas/Mensagens (Career Studio M6) ───────────────────────────
+// Textos gerados por IA e personalizados para a vaga. Persistidos por
+// usuário+vaga para revisita/edição posterior (padrão do CV).
+export type MessageType = 'cover_letter' | 'recruiter_dm' | 'email' | 'follow_up';
+
+export interface Message {
+  id: string;
+  user_id: string;
+  job_id: string;
+  type: MessageType;
+  /** Assunto — usado no e-mail; null nos demais tipos. */
+  subject: string | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Resultado efêmero da geração (antes de salvar). */
+export interface MessageDraft {
+  subject: string | null;
+  content: string;
+}
+
+/** Payload de criação/edição de uma mensagem persistida. */
+export interface MessageInput {
+  job_id: string;
+  type: MessageType;
+  subject?: string | null;
+  content: string;
+}
+
+/** Contexto enviado pelo front para a IA gerar a mensagem. */
+export interface MessageGenRequest {
+  type: MessageType;
+  job: {
+    title: string;
+    company: string;
+    level: 'Junior' | 'Pleno' | 'Senior';
+    remote: boolean;
+    skills: string[];
+    description: string;
+  };
+  candidate: {
+    name: string;
+    bio?: string | null;
+    skills?: string[];
+    /** Cargo atual/último, p/ contextualizar (ex.: do LinkedIn). */
+    currentRole?: string | null;
+    /** Resumo do candidato (ex.: bloco "resumo" do CV), opcional. */
+    summary?: string | null;
+  };
 }
 
 // ── Career Profile ─────────────────────────────────────────────────

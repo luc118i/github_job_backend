@@ -11,6 +11,7 @@ import authRouter from './routes/auth';
 import analyzeLinkRouter from './routes/analyzeLink';
 import careerRouter from './routes/career';
 import projectsRouter from './routes/projects';
+import messagesRouter from './routes/messages';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -60,6 +61,7 @@ app.use('/profession-jobs', heavyLimiter, professionJobsRouter);
 app.use('/analyze-link', analyzeLinkRouter);
 app.use('/career', careerRouter);
 app.use('/projects', projectsRouter);
+app.use('/messages', heavyLimiter, messagesRouter);
 
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
