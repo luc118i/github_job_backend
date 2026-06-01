@@ -136,6 +136,18 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
 }
 
 /** Extracts the most recent job title to use as a search query. */
+function filterByMaxAge<T>(jobs: T[], maxAgeDays: number): T[] {
+  if (maxAgeDays >= 90) return jobs; // 90 dias = sem filtro hard (comportamento legado)
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - maxAgeDays);
+  return jobs.filter((j) => {
+    const pa = (j as Record<string, unknown>)['published_at'];
+    if (!pa || typeof pa !== 'string') return true; // sem data = mantém
+    const d = new Date(pa);
+    return !isNaN(d.getTime()) && d >= cutoff;
+  });
+}
+
 function extractCurrentTitle(positions: LinkedInPosition[]): string | null {
   if (!positions.length) return null;
   const sorted = [...positions].sort((a, b) => {
@@ -446,6 +458,9 @@ Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade.
     }));
 
   // Para perfis jurídicos, busca fontes especializadas em paralelo com o resultado da IA
+  const filteredAiJobs = filterByMaxAge(aiJobs, maxAge);
+  console.log(`[profession] maxAge=${maxAge}d → ${aiJobs.length} vagas → ${filteredAiJobs.length} após filtro de data`);
+
   if (lawProfile) {
     const lawQueries = buildLawQueries(positions, specialties, certifications);
     const legalSourceJobs = await fetchLegalJobs(lawQueries, preferences, blockedKeywords);
@@ -465,20 +480,21 @@ Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade.
         match:       50,
       }));
 
-    console.log(`[profession/law] claude: ${aiJobs.length} | fontes especializadas: ${legalProfJobs.length}`);
+    const filteredLegalJobs = filterByMaxAge(legalProfJobs, maxAge);
+    console.log(`[profession/law] claude: ${filteredAiJobs.length} | fontes especializadas: ${filteredLegalJobs.length}`);
     return {
       profileSummary: result.profileSummary ?? '',
-      jobs: [...aiJobs, ...legalProfJobs],
+      jobs: [...filteredAiJobs, ...filteredLegalJobs],
     };
   }
 
   // If all jobs were filtered out, signal failure so the caller can try a better fallback
-  if (!aiJobs.length) {
-    console.warn(`[profession] Claude retornou vagas mas todas foram bloqueadas. rawJobs=${rawJobs.length} → 0 após filtro.`);
+  if (!filteredAiJobs.length) {
+    console.warn(`[profession] Nenhuma vaga após filtro de data (maxAge=${maxAge}d). rawJobs=${rawJobs.length}.`);
     return null;
   }
 
-  return { profileSummary: result.profileSummary ?? '', jobs: aiJobs };
+  return { profileSummary: result.profileSummary ?? '', jobs: filteredAiJobs };
 }
 
 // ── Query-based pre-fetch (Remotive + Gupy without LinkedIn) ─────
@@ -628,9 +644,17 @@ Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Pa
     return null;
   }
 
+  const filteredJobs = filterByMaxAge(jobs, maxAge);
+  console.log(`[query] maxAge=${maxAge}d → ${jobs.length} vagas → ${filteredJobs.length} após filtro de data`);
+
+  if (!filteredJobs.length) {
+    console.warn(`[query] Nenhuma vaga após filtro de data (maxAge=${maxAge}d).`);
+    return null;
+  }
+
   return {
     profileSummary: result.profileSummary ?? query,
-    jobs,
+    jobs: filteredJobs,
   };
 }
 

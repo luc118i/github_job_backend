@@ -116,6 +116,7 @@ export interface ProfessionJob {
   salary: string | null;
   link: string | null;
   match: number;
+  published_at?: string | null;
 }
 
 export interface ProfessionSearchResult {
