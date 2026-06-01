@@ -151,12 +151,11 @@ function filterByPtBr<T extends { title: string }>(jobs: T[], ptBrOnly: boolean)
 }
 
 function filterByMaxAge<T>(jobs: T[], maxAgeDays: number): T[] {
-  if (maxAgeDays >= 90) return jobs; // 90 dias = sem filtro hard (comportamento legado)
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - maxAgeDays);
   return jobs.filter((j) => {
     const pa = (j as Record<string, unknown>)['published_at'];
-    if (!pa || typeof pa !== 'string') return true; // sem data = mantém
+    if (!pa || typeof pa !== 'string') return true; // sem data = mantém (não punir sem dado)
     const d = new Date(pa);
     return !isNaN(d.getTime()) && d >= cutoff;
   });
