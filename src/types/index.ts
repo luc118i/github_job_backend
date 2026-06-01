@@ -193,6 +193,36 @@ export interface CvVersion {
   created_at: string;
 }
 
+// ── Biblioteca de Projetos (Career Studio M5) ─────────────────────
+// Coleção curada de projetos do usuário. Reusada nos CVs e ranqueada
+// por relevância à vaga via match determinístico (sem IA/embeddings).
+export interface Project {
+  id: string;
+  user_id: string;
+  title: string;
+  /** Descrição em texto/Markdown. */
+  description: string;
+  /** Stack/tecnologias — base do match com as skills da vaga. */
+  tech: string[];
+  /** Conquistas/destaques em bullets (entram no bloco "projetos"). */
+  highlights: string[];
+  link: string | null;
+  /** Repositório GitHub de origem, quando importado. */
+  repo: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Payload aceito ao criar/editar um projeto (sem campos do servidor).
+export interface ProjectInput {
+  title: string;
+  description?: string;
+  tech?: string[];
+  highlights?: string[];
+  link?: string | null;
+  repo?: string | null;
+}
+
 // ── Career Profile ─────────────────────────────────────────────────
 
 export type WorkStyle = 'analytical' | 'creative' | 'operational' | 'relational';
