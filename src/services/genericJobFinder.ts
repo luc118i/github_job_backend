@@ -136,6 +136,20 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
 }
 
 /** Extracts the most recent job title to use as a search query. */
+function filterByLevel<T extends { title: string; level?: string }>(jobs: T[], level: UserPreferences['level']): T[] {
+  if (level === 'any') return jobs;
+  return jobs.filter((j) => {
+    const inferred = inferLevelFromTitle(j.title) ?? (j.level as 'Junior' | 'Pleno' | 'Senior' | undefined);
+    if (!inferred) return true; // não foi possível determinar — mantém
+    return inferred === level;
+  });
+}
+
+function filterByPtBr<T extends { title: string }>(jobs: T[], ptBrOnly: boolean): T[] {
+  if (!ptBrOnly) return jobs;
+  return jobs.filter((j) => isPtBrTitle(j.title));
+}
+
 function filterByMaxAge<T>(jobs: T[], maxAgeDays: number): T[] {
   if (maxAgeDays >= 90) return jobs; // 90 dias = sem filtro hard (comportamento legado)
   const cutoff = new Date();
@@ -694,24 +708,29 @@ export async function findJobsByQuery(
   }
 
   const maxAgeDays = preferences?.maxAgeDays ?? 90;
-  function applyDateFilter(result: ProfessionSearchResult): ProfessionSearchResult {
-    const filtered = filterByMaxAge(result.jobs, maxAgeDays);
-    if (filtered.length !== result.jobs.length)
-      console.log(`[query] date-filter maxAge=${maxAgeDays}d → ${result.jobs.length} → ${filtered.length}`);
-    return { ...result, jobs: filtered };
+  const levelPref   = preferences?.level ?? 'any';
+  const ptBrOnly    = preferences?.ptBrOnly ?? false;
+
+  function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
+    let jobs = filterByMaxAge(result.jobs, maxAgeDays);
+    jobs = filterByLevel(jobs, levelPref);
+    jobs = filterByPtBr(jobs, ptBrOnly);
+    if (jobs.length !== result.jobs.length)
+      console.log(`[query] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
+    return { ...result, jobs };
   }
 
   // Step 2: Gemini
   try {
     const result = applyBlockFilter(await findJobsByQueryGemini(query, preferences), blockedKeywords, careerProfile);
-    if (result.jobs.length > 0) return applyDateFilter(applyInternFilter(result));
+    if (result.jobs.length > 0) return applyPreferenceFilters(applyInternFilter(result));
     console.warn('[query] Gemini retornou 0 vagas úteis, usando script direto...');
   } catch {
     console.warn('[query] Gemini falhou, usando script direto...');
   }
 
   // Step 3: Smart script fallback — GitHub tech stack + career profile signals
-  return applyDateFilter(applyInternFilter(await fetchDirectJobs([query], preferences, blockedKeywords, careerProfile, githubUsername)));
+  return applyPreferenceFilters(applyInternFilter(await fetchDirectJobs([query], preferences, blockedKeywords, careerProfile, githubUsername)));
 }
 
 // ── Fallback helpers (used when AI is unavailable) ────────────────
@@ -1213,16 +1232,21 @@ export async function findProfessionJobs(
   }
 
   const maxAgeDays = preferences?.maxAgeDays ?? 90;
-  function applyDateFilter(result: ProfessionSearchResult): ProfessionSearchResult {
-    const filtered = filterByMaxAge(result.jobs, maxAgeDays);
-    if (filtered.length !== result.jobs.length)
-      console.log(`[profession] date-filter maxAge=${maxAgeDays}d → ${result.jobs.length} → ${filtered.length}`);
-    return { ...result, jobs: filtered };
+  const levelPref   = preferences?.level ?? 'any';
+  const ptBrOnly    = preferences?.ptBrOnly ?? false;
+
+  function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
+    let jobs = filterByMaxAge(result.jobs, maxAgeDays);
+    jobs = filterByLevel(jobs, levelPref);
+    jobs = filterByPtBr(jobs, ptBrOnly);
+    if (jobs.length !== result.jobs.length)
+      console.log(`[profession] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
+    return { ...result, jobs };
   }
 
   try {
     const result = await findProfessionJobsClaude(positions, education, certifications, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
-    if (result && result.jobs.length > 0) return applyDateFilter(applyInternFilter(result));
+    if (result && result.jobs.length > 0) return applyPreferenceFilters(applyInternFilter(result));
     console.warn('[profession] Claude retornou 0 vagas úteis, ativando fallback...');
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
@@ -1231,5 +1255,5 @@ export async function findProfessionJobs(
       console.error('[profession] Erro inesperado, ativando fallback:', (err as Error).message);
     }
   }
-  return applyDateFilter(applyInternFilter(await fallback()));
+  return applyPreferenceFilters(applyInternFilter(await fallback()));
 }
