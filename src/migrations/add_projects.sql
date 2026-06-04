@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS projects (
   link        TEXT,
   -- Repositório GitHub de origem, quando importado (chave de dedupe).
   repo        TEXT,
+  -- README do repo, cacheado para o match por IA (evita rebuscar o GitHub).
+  readme      TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -22,8 +24,9 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE INDEX IF NOT EXISTS idx_projects_user
   ON projects (user_id, created_at DESC);
 
--- Para bases que já criaram a tabela antes desta coluna existir.
+-- Para bases que já criaram a tabela antes destas colunas existirem.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'outro';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS readme TEXT;
 
 COMMENT ON TABLE projects IS
   'Biblioteca de Projetos do usuário (Career Studio M5). Curada uma vez e reusada nos CVs; match projeto↔vaga é determinístico no front.';

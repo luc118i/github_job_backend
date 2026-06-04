@@ -1,7 +1,9 @@
 import { Router, Response } from 'express';
 import { supabase } from '../services/supabase';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { ProjectInput, ProjectCategory } from '../types';
+import { ProjectInput, ProjectCategory, ProjectMatchJob } from '../types';
+import { matchProjects, MatchProject } from '../services/projectMatcher';
+import { fetchRepoReadme, parseGithubUrl } from '../services/githubReadme';
 
 const router = Router();
 
@@ -139,6 +141,65 @@ router.post('/import', async (req: AuthRequest, res: Response) => {
     return;
   }
   res.status(201).json(data ?? []);
+});
+
+// POST /projects/match-ai — ranqueia os projetos do usuário para uma vaga
+// usando IA (lê o README de cada repo). README é cacheado no banco: só
+// buscamos no GitHub os que ainda não têm. Custo: 1 chamada de IA p/ todos.
+router.post('/match-ai', async (req: AuthRequest, res: Response) => {
+  const { job } = req.body as { job?: ProjectMatchJob };
+  if (!job || typeof job.title !== 'string' || !job.title.trim()) {
+    res.status(400).json({ error: 'Informe a vaga (job.title) para o match.' });
+    return;
+  }
+
+  // Projetos do usuário (inclui readme cacheado + link p/ buscar o que falta).
+  const { data: projects, error } = await supabase
+    .from('projects')
+    .select('id, title, description, tech, link, repo, readme')
+    .eq('user_id', req.userId!);
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  if (!projects || projects.length === 0) {
+    res.json([]); // biblioteca vazia — nada a ranquear
+    return;
+  }
+
+  // Completa o README dos que ainda não têm cache (best-effort, em paralelo).
+  await Promise.all(
+    projects.map(async (p) => {
+      if (p.readme != null) return; // já cacheado (string vazia inclusive)
+      const gh = parseGithubUrl(p.link as string | null);
+      if (!gh) return;
+      const readme = await fetchRepoReadme(gh.owner, gh.repo);
+      p.readme = readme ?? '';
+      // Persiste o cache (não bloqueia a resposta se falhar).
+      await supabase.from('projects').update({ readme: p.readme }).eq('id', p.id).eq('user_id', req.userId!);
+    }),
+  );
+
+  const matchInput: MatchProject[] = projects.map((p) => ({
+    id: p.id as string,
+    title: (p.title as string) ?? '',
+    description: (p.description as string) ?? '',
+    tech: Array.isArray(p.tech) ? (p.tech as string[]) : [],
+    readme: (p.readme as string | null) ?? null,
+  }));
+
+  try {
+    const matches = await matchProjects(
+      { title: job.title, skills: Array.isArray(job.skills) ? job.skills : [], description: job.description ?? '' },
+      matchInput,
+    );
+    res.json(matches);
+  } catch (e) {
+    const msg = (e as Error).message ?? 'Falha no match por IA.';
+    console.error('[projects/match-ai]', msg);
+    res.status(503).json({ error: 'O serviço de IA está indisponível agora. Tente novamente em instantes.' });
+  }
 });
 
 // DELETE /projects/:id — remove um projeto (só do próprio usuário).

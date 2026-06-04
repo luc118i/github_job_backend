@@ -215,6 +215,8 @@ export interface Project {
   link: string | null;
   /** Repositório GitHub de origem, quando importado (chave de dedupe). */
   repo: string | null;
+  /** README do repo, cacheado para o match por IA. */
+  readme?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -228,6 +230,23 @@ export interface ProjectInput {
   category?: ProjectCategory;
   link?: string | null;
   repo?: string | null;
+}
+
+// ── Match projeto↔vaga por IA (lê o README) ───────────────────────
+/** Vaga enviada pelo front para o match semântico por IA. */
+export interface ProjectMatchJob {
+  title: string;
+  skills: string[];
+  description: string;
+}
+
+/** Score semântico de um projeto para a vaga, com justificativa curta. */
+export interface ProjectAiMatch {
+  id: string;
+  /** 0-100 — relevância considerando transferência de competências. */
+  score: number;
+  /** 1 frase explicando o porquê do score (pt-BR). */
+  reason: string;
 }
 
 // ── Cartas/Mensagens (Career Studio M6) ───────────────────────────
