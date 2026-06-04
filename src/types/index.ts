@@ -280,6 +280,11 @@ export interface MessageInput {
   content: string;
 }
 
+// Controles de geração (M6+): ajustam tom, tamanho e idioma da saída.
+export type MessageTone = 'formal' | 'balanced' | 'casual';
+export type MessageLength = 'short' | 'medium' | 'long';
+export type MessageLanguage = 'pt' | 'en';
+
 /** Contexto enviado pelo front para a IA gerar a mensagem. */
 export interface MessageGenRequest {
   type: MessageType;
@@ -300,6 +305,93 @@ export interface MessageGenRequest {
     /** Resumo do candidato (ex.: bloco "resumo" do CV), opcional. */
     summary?: string | null;
   };
+  /** Tom da mensagem (default: balanced). */
+  tone?: MessageTone;
+  /** Comprimento (default: medium). */
+  length?: MessageLength;
+  /** Idioma de saída (default: pt). */
+  language?: MessageLanguage;
+  /** Quantas versões gerar de uma vez, 1-3 (default: 1). */
+  variations?: number;
+}
+
+// ── Interview Studio (Career Studio M7) ───────────────────────────
+// Preparação para entrevista por vaga: perguntas prováveis (com resposta
+// sugerida em STAR), perguntas para o recrutador e simulação interativa.
+
+/** Vaga usada como contexto da preparação (mesma forma das mensagens). */
+export interface InterviewJob {
+  title: string;
+  company: string;
+  level: 'Junior' | 'Pleno' | 'Senior';
+  remote: boolean;
+  skills: string[];
+  description: string;
+}
+
+/** Candidato usado como contexto (perfil + projetos reais). */
+export interface InterviewCandidate {
+  name: string;
+  bio?: string | null;
+  skills?: string[];
+  /** Cargo atual/último (ex.: do LinkedIn). */
+  currentRole?: string | null;
+  /** Resumo profissional (ex.: bloco "resumo" do CV). */
+  summary?: string | null;
+  /** Títulos de projetos relevantes, p/ ancorar as respostas STAR. */
+  projects?: string[];
+}
+
+export type InterviewQCategory = 'tecnica' | 'comportamental';
+
+/** Pergunta provável + resposta sugerida no método STAR. */
+export interface InterviewQuestion {
+  category: InterviewQCategory;
+  question: string;
+  /** Rascunho de resposta (STAR) baseado no perfil real do candidato. */
+  suggestedAnswer: string;
+}
+
+/** Resultado da geração (efêmero, antes de salvar). */
+export interface InterviewPrepDraft {
+  questions: InterviewQuestion[];
+  recruiterQuestions: string[];
+}
+
+/** Preparação persistida por usuário+vaga. */
+export interface InterviewPrep extends InterviewPrepDraft {
+  id: string;
+  user_id: string;
+  job_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Payload de criação/atualização (upsert por vaga). */
+export interface InterviewPrepInput {
+  job_id: string;
+  questions: InterviewQuestion[];
+  recruiterQuestions: string[];
+}
+
+/** Pedido de geração da preparação. */
+export interface InterviewGenRequest {
+  job: InterviewJob;
+  candidate: InterviewCandidate;
+}
+
+/** Turno do chat de simulação. */
+export interface InterviewChatTurn {
+  role: 'interviewer' | 'candidate';
+  content: string;
+}
+
+/** Pedido de um turno da simulação interativa (chat). */
+export interface InterviewChatRequest {
+  job: InterviewJob;
+  candidate: InterviewCandidate;
+  /** Conversa até agora; vazio = início (IA faz a 1ª pergunta). */
+  history: InterviewChatTurn[];
 }
 
 // ── Career Profile ─────────────────────────────────────────────────
