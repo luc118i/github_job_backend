@@ -418,3 +418,37 @@ export interface CareerChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+
+// ── Portfólio Público (Career Studio M8) ──────────────────────────
+// Página pública /p/<github_username>, montada a partir do GitHub +
+// biblioteca de projetos + LinkedIn. Aqui ficam só os controles curados.
+
+/** Configurações editáveis pelo dono (área autenticada). */
+export interface PortfolioSettings {
+  published: boolean;
+  headline: string | null;
+  summary: string | null;
+}
+
+/** Projeto exposto no portfólio público (subset do Project). */
+export interface PortfolioProject {
+  title: string;
+  description: string;
+  tech: string[];
+  category: string;
+  link: string | null;
+  repo: string | null;
+}
+
+/** Payload público da página /p/<username> (sem dados sensíveis). */
+export interface PortfolioData {
+  githubUsername: string;
+  name: string;
+  headline: string | null;
+  summary: string | null;
+  /** E-mail de contato (CTA); o dono opta por publicar. */
+  contactEmail: string | null;
+  projects: PortfolioProject[];
+  positions: LinkedInPosition[];
+  education: LinkedInEducation[];
+}
