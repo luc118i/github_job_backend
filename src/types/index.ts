@@ -470,6 +470,35 @@ export interface PipelineEntryInput {
   cv_id?: string | null;
 }
 
+// ── IA Insights do Pipeline (MVC v4.0 F5) ─────────────────────────
+/** Resumo de uma candidatura enviado para a IA analisar. */
+export interface PipelineInsightItem {
+  title: string;
+  company: string;
+  skills: string[];
+  status: PipelineStatus;
+  /** Dias parado na etapa atual. */
+  days: number;
+}
+
+export interface PipelineInsightsRequest {
+  items: PipelineInsightItem[];
+}
+
+/** Vaga com maior chance de retorno (estimada pela IA). */
+export interface PipelineTopChance {
+  label: string;
+  score: number;
+  reason: string;
+}
+
+export interface PipelineInsights {
+  topChances: PipelineTopChance[];
+  positiveAreas: string[];
+  negativeAreas: string[];
+  recommendedAction: string;
+}
+
 /** Payload público da página /p/<username> (sem dados sensíveis). */
 export interface PortfolioData {
   githubUsername: string;

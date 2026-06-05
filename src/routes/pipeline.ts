@@ -1,7 +1,8 @@
 import { Router, Response } from 'express';
 import { supabase } from '../services/supabase';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { PipelineStatus, PipelineEntryInput } from '../types';
+import { PipelineStatus, PipelineEntryInput, PipelineInsightsRequest } from '../types';
+import { generatePipelineInsights } from '../services/pipelineInsights';
 
 const router = Router();
 router.use(requireAuth);
@@ -84,6 +85,23 @@ router.put('/:jobId', async (req: AuthRequest, res: Response) => {
     return;
   }
   res.json(data);
+});
+
+// POST /pipeline/insights — IA analisa o pipeline e devolve padrões (F5).
+// O front envia o resumo das candidaturas (efêmero, não persiste).
+router.post('/insights', async (req: AuthRequest, res: Response) => {
+  const body = req.body as PipelineInsightsRequest;
+  if (!Array.isArray(body?.items) || body.items.length === 0) {
+    res.status(400).json({ error: 'Sem candidaturas para analisar.' });
+    return;
+  }
+  try {
+    const insights = await generatePipelineInsights(body.items.slice(0, 60));
+    res.json(insights);
+  } catch (err) {
+    console.error('[pipeline/insights]', err);
+    res.status(503).json({ error: 'A IA está indisponível agora. Tente novamente em instantes.' });
+  }
 });
 
 // DELETE /pipeline/:jobId — remove a entrada (vaga descartada do pipeline).
