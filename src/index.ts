@@ -14,6 +14,7 @@ import projectsRouter from './routes/projects';
 import messagesRouter from './routes/messages';
 import interviewRouter from './routes/interview';
 import portfolioRouter from './routes/portfolio';
+import pipelineRouter from './routes/pipeline';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -66,6 +67,7 @@ app.use('/projects', projectsRouter);
 app.use('/messages', heavyLimiter, messagesRouter);
 app.use('/interview', heavyLimiter, interviewRouter);
 app.use('/portfolio', portfolioRouter);
+app.use('/pipeline', pipelineRouter);
 
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);

@@ -440,6 +440,36 @@ export interface PortfolioProject {
   repo: string | null;
 }
 
+// ── Job Pipeline CRM (MVC v4.0) ───────────────────────────────────
+export type PipelineStatus =
+  | 'salvas' | 'preparar' | 'aplicadas' | 'em_analise' | 'entrevista' | 'proposta' | 'contratado';
+
+/** Metadados de uma candidatura no pipeline (por usuário+vaga). */
+export interface PipelineEntry {
+  id: string;
+  user_id: string;
+  job_id: string;
+  status: PipelineStatus;
+  favorite: boolean;
+  notes: string;
+  next_step: string | null;
+  next_step_date: string | null;
+  cv_id: string | null;
+  moved_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Campos editáveis no upsert de uma entrada do pipeline. */
+export interface PipelineEntryInput {
+  status?: PipelineStatus;
+  favorite?: boolean;
+  notes?: string;
+  next_step?: string | null;
+  next_step_date?: string | null;
+  cv_id?: string | null;
+}
+
 /** Payload público da página /p/<username> (sem dados sensíveis). */
 export interface PortfolioData {
   githubUsername: string;
