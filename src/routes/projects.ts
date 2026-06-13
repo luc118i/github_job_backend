@@ -4,6 +4,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ProjectInput, ProjectCategory, ProjectMatchJob } from '../types';
 import { matchProjects, MatchProject } from '../services/projectMatcher';
 import { fetchRepoReadme, parseGithubUrl } from '../services/githubReadme';
+import { enrichProject } from '../services/projectEnricher';
 
 const router = Router();
 
@@ -40,7 +41,7 @@ function sanitize(body: ProjectInput) {
 router.get('/', async (req: AuthRequest, res: Response) => {
   const { data, error } = await supabase
     .from('projects')
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, created_at, updated_at')
+    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
     .eq('user_id', req.userId!)
     .order('created_at', { ascending: false });
 
@@ -62,7 +63,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   const { data, error } = await supabase
     .from('projects')
     .insert({ ...payload, user_id: req.userId! })
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, created_at, updated_at')
+    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
     .single();
 
   if (error) {
@@ -85,7 +86,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
     .update({ ...payload, updated_at: new Date().toISOString() })
     .eq('id', req.params.id)
     .eq('user_id', req.userId!)
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, created_at, updated_at')
+    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
     .maybeSingle();
 
   if (error) {
@@ -134,7 +135,7 @@ router.post('/import', async (req: AuthRequest, res: Response) => {
   const { data, error } = await supabase
     .from('projects')
     .insert(rows)
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, created_at, updated_at');
+    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at');
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -200,6 +201,71 @@ router.post('/match-ai', async (req: AuthRequest, res: Response) => {
     console.error('[projects/match-ai]', msg);
     res.status(503).json({ error: 'O serviço de IA está indisponível agora. Tente novamente em instantes.' });
   }
+});
+
+// Enriquece uma linha de projeto: garante README, gera competências (IA) e
+// calcula o Portfolio Score; persiste e devolve o projeto atualizado.
+const ENRICH_SELECT = 'id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at';
+async function enrichRow(userId: string, row: Record<string, unknown>) {
+  let readme = (row.readme as string | null) ?? null;
+  if (readme == null) {
+    const gh = parseGithubUrl(row.link as string | null);
+    if (gh) readme = await fetchRepoReadme(gh.owner, gh.repo);
+  }
+  const { competencies, score } = await enrichProject({
+    title: (row.title as string) ?? '',
+    description: (row.description as string) ?? '',
+    tech: Array.isArray(row.tech) ? (row.tech as string[]) : [],
+    readme: readme ?? '',
+  });
+  const { data } = await supabase
+    .from('projects')
+    .update({ competencies, portfolio_score: score, readme: readme ?? '', updated_at: new Date().toISOString() })
+    .eq('id', row.id as string)
+    .eq('user_id', userId)
+    .select(ENRICH_SELECT)
+    .single();
+  return data;
+}
+
+// POST /projects/:id/enrich — analisa 1 projeto com IA (competências + score).
+router.post('/:id/enrich', async (req: AuthRequest, res: Response) => {
+  const { data: row, error } = await supabase
+    .from('projects')
+    .select('id, title, description, tech, link, repo, readme')
+    .eq('id', req.params.id)
+    .eq('user_id', req.userId!)
+    .maybeSingle();
+  if (error || !row) {
+    res.status(404).json({ error: 'Projeto não encontrado.' });
+    return;
+  }
+  try {
+    res.json(await enrichRow(req.userId!, row));
+  } catch (e) {
+    console.error('[projects/enrich]', e);
+    res.status(503).json({ error: 'A IA está indisponível agora. Tente novamente em instantes.' });
+  }
+});
+
+// POST /projects/enrich-all — analisa todos os projetos ainda sem score.
+router.post('/enrich-all', async (req: AuthRequest, res: Response) => {
+  const { data: rows, error } = await supabase
+    .from('projects')
+    .select('id, title, description, tech, link, repo, readme, portfolio_score')
+    .eq('user_id', req.userId!)
+    .is('portfolio_score', null);
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  const pending = (rows ?? []).slice(0, 20); // limita p/ não estourar custo/tempo
+  const updated = [];
+  for (const row of pending) {
+    try { updated.push(await enrichRow(req.userId!, row)); }
+    catch (e) { console.warn('[projects/enrich-all] falha em', row.id, (e as Error).message); }
+  }
+  res.json(updated);
 });
 
 // DELETE /projects/:id — remove um projeto (só do próprio usuário).

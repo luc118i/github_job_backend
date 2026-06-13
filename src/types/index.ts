@@ -217,6 +217,10 @@ export interface Project {
   repo: string | null;
   /** README do repo, cacheado para o match por IA. */
   readme?: string | null;
+  /** Competências detectadas pela IA (Biblioteca v5.0). */
+  competencies?: string[];
+  /** Portfolio Score 0-100 (heurística). null = não analisado. */
+  portfolio_score?: number | null;
   created_at: string;
   updated_at: string;
 }
