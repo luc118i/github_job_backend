@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { PortfolioData, PortfolioProject, PortfolioRecruiter, PortfolioTemplate, LinkedInData, CareerProfile, UserPreferences } from '../types';
 import { askAboutCandidate, PortfolioChatTurn } from '../services/portfolioChat';
+import { generatePortfolioTexts } from '../services/portfolioGenerator';
 
 const router = Router();
 
@@ -119,6 +120,51 @@ router.post('/public/:username/ask', async (req: Request, res: Response) => {
     res.json({ answer });
   } catch (e) {
     console.error('[portfolio/ask]', e);
+    res.status(503).json({ error: 'A IA está indisponível agora. Tente novamente em instantes.' });
+  }
+});
+
+// POST /portfolio/generate — IA gera headline + resumo a partir das fontes.
+router.post('/generate', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { data: user } = await supabase
+    .from('users')
+    .select('name, github_username, linkedin_data, career_profile')
+    .eq('id', req.userId!)
+    .maybeSingle();
+  if (!user) {
+    res.status(404).json({ error: 'Usuário não encontrado.' });
+    return;
+  }
+
+  const { data: projects } = await supabase
+    .from('projects')
+    .select('title, tech, competencies')
+    .eq('user_id', req.userId!)
+    .order('portfolio_score', { ascending: false, nullsFirst: false })
+    .limit(8);
+
+  const li = (user.linkedin_data as LinkedInData | null) ?? null;
+  const career = (user.career_profile as CareerProfile | null) ?? null;
+
+  const comps = new Set<string>();
+  (projects ?? []).forEach((p) => (Array.isArray(p.competencies) ? (p.competencies as string[]) : []).forEach((c) => comps.add(c)));
+
+  try {
+    const draft = await generatePortfolioTexts({
+      name: (user.name as string) ?? (user.github_username as string) ?? 'Profissional',
+      positions: (li?.positions ?? []).map((p) => ({ title: p.title, company: p.company, description: p.description })),
+      projects: (projects ?? []).map((p) => ({
+        title: (p.title as string) ?? '',
+        tech: Array.isArray(p.tech) ? (p.tech as string[]) : [],
+        competencies: Array.isArray(p.competencies) ? (p.competencies as string[]) : [],
+      })),
+      desiredAreas: career?.desiredAreas ?? [],
+      careerGoals: career?.careerGoals ?? null,
+      competencies: [...comps],
+    });
+    res.json(draft);
+  } catch (e) {
+    console.error('[portfolio/generate]', e);
     res.status(503).json({ error: 'A IA está indisponível agora. Tente novamente em instantes.' });
   }
 });
