@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { PortfolioData, PortfolioProject, PortfolioRecruiter, PortfolioTemplate, LinkedInData, CareerProfile, UserPreferences } from '../types';
+import { askAboutCandidate, PortfolioChatTurn } from '../services/portfolioChat';
 
 const router = Router();
 
@@ -27,33 +28,16 @@ function buildRecruiter(prefs: UserPreferences | null, career: CareerProfile | n
   return { level, area, location, remote, salary };
 }
 
-// ── Página pública (sem auth) ─────────────────────────────────────
-// GET /portfolio/public/:username — dados públicos do portfólio, se publicado.
-// Montado a partir do users + biblioteca de projetos + LinkedIn salvos.
-router.get('/public/:username', async (req: Request, res: Response) => {
-  const username = String(req.params.username ?? '').trim();
-  if (!username) {
-    res.status(400).json({ error: 'username é obrigatório.' });
-    return;
-  }
-
+// Monta os dados públicos do portfólio (ou null se inexistente/não publicado).
+// Reusado pela página pública e pelo chat "Pergunte sobre mim".
+async function gatherPortfolio(username: string): Promise<PortfolioData | null> {
   const { data: user, error } = await supabase
     .from('users')
     .select('id, name, email, github_username, linkedin_data, preferences, career_profile, portfolio_published, portfolio_headline, portfolio_summary, portfolio_template')
-    .ilike('github_username', username) // case-insensitive
+    .ilike('github_username', username)
     .maybeSingle();
+  if (error || !user || !user.portfolio_published) return null;
 
-  if (error) {
-    res.status(500).json({ error: error.message });
-    return;
-  }
-  // 404 genérico tanto p/ inexistente quanto p/ não publicado (não vaza existência).
-  if (!user || !user.portfolio_published) {
-    res.status(404).json({ error: 'Portfólio não encontrado ou não publicado.' });
-    return;
-  }
-
-  // Projetos da biblioteca do usuário (todos os curados são públicos).
   const { data: projects } = await supabase
     .from('projects')
     .select('title, description, tech, competencies, highlights, category, link, repo, portfolio_score')
@@ -71,7 +55,6 @@ router.get('/public/:username', async (req: Request, res: Response) => {
     repo: (p.repo as string | null) ?? null,
   }));
 
-  // Competências agregadas (dedup, preservando ordem por relevância).
   const seen = new Set<string>();
   const competencies: string[] = [];
   for (const p of portfolioProjects) {
@@ -83,7 +66,7 @@ router.get('/public/:username', async (req: Request, res: Response) => {
 
   const li = (user.linkedin_data as LinkedInData | null) ?? null;
 
-  const payload: PortfolioData = {
+  return {
     githubUsername: (user.github_username as string) ?? username,
     name: (user.name as string) ?? (user.github_username as string) ?? username,
     headline: (user.portfolio_headline as string | null) ?? null,
@@ -100,8 +83,44 @@ router.get('/public/:username', async (req: Request, res: Response) => {
       (user.career_profile as CareerProfile | null) ?? null,
     ),
   };
+}
 
+// ── Página pública (sem auth) ─────────────────────────────────────
+// GET /portfolio/public/:username — dados públicos do portfólio, se publicado.
+router.get('/public/:username', async (req: Request, res: Response) => {
+  const username = String(req.params.username ?? '').trim();
+  if (!username) {
+    res.status(400).json({ error: 'username é obrigatório.' });
+    return;
+  }
+  const payload = await gatherPortfolio(username);
+  if (!payload) {
+    res.status(404).json({ error: 'Portfólio não encontrado ou não publicado.' });
+    return;
+  }
   res.json(payload);
+});
+
+// POST /portfolio/public/:username/ask — chat "Pergunte sobre mim" (sem auth).
+router.post('/public/:username/ask', async (req: Request, res: Response) => {
+  const username = String(req.params.username ?? '').trim();
+  const { question, history } = req.body as { question?: string; history?: PortfolioChatTurn[] };
+  if (!question || !question.trim()) {
+    res.status(400).json({ error: 'Faça uma pergunta.' });
+    return;
+  }
+  const payload = await gatherPortfolio(username);
+  if (!payload) {
+    res.status(404).json({ error: 'Portfólio não encontrado ou não publicado.' });
+    return;
+  }
+  try {
+    const answer = await askAboutCandidate(payload, question.trim().slice(0, 400), Array.isArray(history) ? history : []);
+    res.json({ answer });
+  } catch (e) {
+    console.error('[portfolio/ask]', e);
+    res.status(503).json({ error: 'A IA está indisponível agora. Tente novamente em instantes.' });
+  }
 });
 
 // ── Configurações (área autenticada) ──────────────────────────────
