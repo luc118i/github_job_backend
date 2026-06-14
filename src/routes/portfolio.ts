@@ -169,12 +169,21 @@ router.post('/generate', requireAuth, async (req: AuthRequest, res: Response) =>
   }
 });
 
+// POST /portfolio/public/:username/view — registra uma visualização (sem auth).
+router.post('/public/:username/view', async (req: Request, res: Response) => {
+  const username = String(req.params.username ?? '').trim();
+  if (!username) { res.status(400).json({ error: 'username é obrigatório.' }); return; }
+  // Best-effort: incremento atômico via função; não falha a página se der erro.
+  try { await supabase.rpc('increment_portfolio_views', { p_username: username }); } catch { /* ignora */ }
+  res.json({ ok: true });
+});
+
 // ── Configurações (área autenticada) ──────────────────────────────
 // GET /portfolio/settings — estado atual de publicação + textos curados.
 router.get('/settings', requireAuth, async (req: AuthRequest, res: Response) => {
   const { data: user, error } = await supabase
     .from('users')
-    .select('portfolio_published, portfolio_headline, portfolio_summary, portfolio_template')
+    .select('portfolio_published, portfolio_headline, portfolio_summary, portfolio_template, portfolio_views')
     .eq('id', req.userId!)
     .maybeSingle();
 
@@ -187,6 +196,7 @@ router.get('/settings', requireAuth, async (req: AuthRequest, res: Response) => 
     headline: (user.portfolio_headline as string | null) ?? null,
     summary: (user.portfolio_summary as string | null) ?? null,
     template: normalizeTemplate(user.portfolio_template),
+    views: Number(user.portfolio_views ?? 0),
   });
 });
 
