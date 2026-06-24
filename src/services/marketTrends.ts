@@ -57,14 +57,66 @@ Habilidades: ${skills}
 Retorne APENAS um array JSON de strings, sem texto antes ou depois. Cada string com no máximo 4 palavras. Exemplo: ["Analista de Dados", "Engenheiro de Dados", "Analista de BI"]`;
 }
 
+// Termos curados por área — usados quando o Gemini está indisponível.
+const STATIC_TRENDS: Record<string, string[]> = {
+  'ti':            ['Analista de TI', 'Analista de Suporte', 'Analista de Sistemas'],
+  'tecnologia':    ['Analista de TI', 'Analista de Sistemas', 'Consultor de TI'],
+  'dados':         ['Analista de Dados', 'Engenheiro de Dados', 'Analista de BI'],
+  'data':          ['Analista de Dados', 'Data Scientist', 'Engenheiro de Dados'],
+  'software':      ['Desenvolvedor de Software', 'Engenheiro de Software', 'Analista de Sistemas'],
+  'dev':           ['Desenvolvedor Full Stack', 'Desenvolvedor Backend', 'Desenvolvedor Frontend'],
+  'frontend':      ['Desenvolvedor Frontend', 'Engenheiro Frontend', 'UI Developer'],
+  'backend':       ['Desenvolvedor Backend', 'Engenheiro Backend', 'API Developer'],
+  'fullstack':     ['Desenvolvedor Full Stack', 'Engenheiro Full Stack'],
+  'nodejs':        ['Desenvolvedor Node.js', 'Desenvolvedor Backend', 'Engenheiro Backend'],
+  'python':        ['Desenvolvedor Python', 'Engenheiro de Dados', 'Cientista de Dados'],
+  'javascript':    ['Desenvolvedor JavaScript', 'Desenvolvedor Frontend', 'Desenvolvedor React'],
+  'react':         ['Desenvolvedor React', 'Desenvolvedor Frontend', 'Engenheiro Frontend'],
+  'mobile':        ['Desenvolvedor Mobile', 'Desenvolvedor React Native', 'Engenheiro Mobile'],
+  'devops':        ['Engenheiro DevOps', 'SRE', 'Engenheiro de Infraestrutura'],
+  'cloud':         ['Engenheiro Cloud', 'Arquiteto de Nuvem', 'DevOps Engineer'],
+  'segurança':     ['Analista de Segurança', 'Engenheiro de Segurança', 'Consultor em Cybersecurity'],
+  'qa':            ['Analista de QA', 'Engenheiro de Testes', 'Analista de Qualidade'],
+  'produto':       ['Product Manager', 'Product Owner', 'Analista de Produto'],
+  'ux':            ['UX Designer', 'Product Designer', 'UX Researcher'],
+  'ui':            ['UI Designer', 'Product Designer', 'Designer de Interface'],
+  'ia':            ['Engenheiro de Machine Learning', 'Cientista de Dados', 'Desenvolvedor de IA'],
+  'machine learning': ['Engenheiro de ML', 'Cientista de Dados', 'Engenheiro de IA'],
+  'administrativo':['Assistente Administrativo', 'Analista Administrativo', 'Coordenador Administrativo'],
+  'financeiro':    ['Analista Financeiro', 'Analista Contábil', 'Controller Financeiro'],
+  'marketing':     ['Analista de Marketing', 'Coordenador de Marketing Digital', 'Gerente de Marketing'],
+  'rh':            ['Analista de RH', 'Analista de Recursos Humanos', 'Business Partner RH'],
+  'vendas':        ['Representante Comercial', 'Executivo de Vendas', 'Analista Comercial'],
+  'logística':     ['Analista de Logística', 'Coordenador de Logística', 'Supervisor de Operações'],
+  'jurídico':      ['Advogado', 'Analista Jurídico', 'Assessor Jurídico'],
+};
+
+function staticFallback(profile: CareerProfile): string[] {
+  const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const areas = [...(profile.desiredAreas ?? []), profile.transitionTarget ?? ''].filter(Boolean);
+  for (const area of areas) {
+    const key = norm(area);
+    for (const [term, titles] of Object.entries(STATIC_TRENDS)) {
+      if (key.includes(term) || term.includes(key)) {
+        for (const t of titles) {
+          if (!seen.has(t)) { seen.add(t); out.push(t); }
+          if (out.length >= 5) return out;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Sugere termos de busca em alta no mercado BR para o perfil informado.
- * Resultado cacheado por 24h. Em caso de falha, retorna [] (o frontend faz
- * fallback para as sugestões do perfil declarado).
+ * Tenta Gemini (com cache 24h); se indisponível usa termos curados estáticos.
  */
 export async function getTrendingSuggestions(profile: CareerProfile): Promise<string[]> {
   const key = profileSignature(profile);
-  if (!key) return [];
+  if (!key) return staticFallback(profile);
 
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.suggestions;
@@ -91,5 +143,8 @@ export async function getTrendingSuggestions(profile: CareerProfile): Promise<st
     }
   }
 
-  return [];
+  // Gemini indisponível — usa termos curados estáticos para o perfil
+  const fallback = staticFallback(profile);
+  console.log(`[trends] Gemini indisponível, usando fallback estático: ${fallback.join(', ')}`);
+  return fallback;
 }
