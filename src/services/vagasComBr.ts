@@ -28,7 +28,7 @@ function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
 }
 
-function extractUfFromLocation(loc: string): string | null {
+export function extractUfFromLocation(loc: string): string | null {
   // Format: "Cidade / UF" or "Cidade / Estado"
   const m = loc.match(/\/\s*([A-Z]{2})\s*$/);
   if (m && BR_STATES.has(m[1])) return m[1];
@@ -88,7 +88,7 @@ async function fetchPage(query: string, page = 1): Promise<AdzunaJob[]> {
 
 export async function searchVagasComBr(
   queries: string[],
-  preferences?: UserPreferences,
+  _preferences?: UserPreferences,
 ): Promise<AdzunaJob[]> {
   const topQueries = queries.slice(0, 4);
   const seen = new Set<string>();
@@ -105,47 +105,10 @@ export async function searchVagasComBr(
     }
   }
 
-  const userUf = extractUfFromUserLocation(preferences?.location ?? '');
-  const wantRemote = preferences?.modality === 'remote';
-
-  if (userUf && !wantRemote) {
-    const filtered = jobs.filter((job) => {
-      const loc = job.location ?? '';
-      if (/^remoto$/i.test(loc.trim())) return true;
-      const jobUf = extractUfFromLocation(loc);
-      return jobUf === userUf;
-    });
-    console.log(`[vagas.com.br] ${jobs.length} raw → ${filtered.length} após filtro estado=${userUf}`);
-    return filtered.slice(0, 40);
-  }
-
-  console.log(`[vagas.com.br] ${jobs.length} vagas encontradas (nacional)`);
-  return jobs.slice(0, 40);
+  // Localização não é filtrada aqui — filterByLocation em applyPreferenceFilters
+  // faz o split matched/outOfArea, permitindo que vagas fora do filtro apareçam
+  // na seção "compatíveis com o perfil".
+  console.log(`[vagas.com.br] ${jobs.length} vagas encontradas`);
+  return jobs.slice(0, 60);
 }
 
-// Extracts the UF from a user preference string like "Guará, Distrito Federal" → "DF"
-function extractUfFromUserLocation(loc: string): string | null {
-  if (!loc) return null;
-  const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
-  const upper = norm(loc);
-
-  const STATE_MAP: Record<string, string> = {
-    'ACRE': 'AC', 'ALAGOAS': 'AL', 'AMAPA': 'AP', 'AMAZONAS': 'AM', 'BAHIA': 'BA',
-    'CEARA': 'CE', 'DISTRITO FEDERAL': 'DF', 'ESPIRITO SANTO': 'ES', 'GOIAS': 'GO',
-    'MARANHAO': 'MA', 'MATO GROSSO DO SUL': 'MS', 'MATO GROSSO': 'MT', 'MINAS GERAIS': 'MG',
-    'PARA': 'PA', 'PARAIBA': 'PB', 'PARANA': 'PR', 'PERNAMBUCO': 'PE', 'PIAUI': 'PI',
-    'RIO DE JANEIRO': 'RJ', 'RIO GRANDE DO NORTE': 'RN', 'RIO GRANDE DO SUL': 'RS',
-    'RONDONIA': 'RO', 'RORAIMA': 'RR', 'SANTA CATARINA': 'SC', 'SAO PAULO': 'SP',
-    'SERGIPE': 'SE', 'TOCANTINS': 'TO', 'BRASILIA': 'DF',
-  };
-
-  for (const [name, uf] of Object.entries(STATE_MAP)) {
-    if (upper.includes(name)) return uf;
-  }
-
-  // Check for 2-letter UF at end: "Curitiba, PR"
-  const ufM = upper.match(/\b([A-Z]{2})\s*$/);
-  if (ufM && BR_STATES.has(ufM[1])) return ufM[1];
-
-  return null;
-}
