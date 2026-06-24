@@ -217,6 +217,10 @@ export interface Project {
   repo: string | null;
   /** README do repo, cacheado para o match por IA. */
   readme?: string | null;
+  /** Competências detectadas pela IA (Biblioteca v5.0). */
+  competencies?: string[];
+  /** Portfolio Score 0-100 (heurística). null = não analisado. */
+  portfolio_score?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -423,11 +427,16 @@ export interface CareerChatMessage {
 // Página pública /p/<github_username>, montada a partir do GitHub +
 // biblioteca de projetos + LinkedIn. Aqui ficam só os controles curados.
 
+/** Templates visuais do portfólio (v6.0). */
+export type PortfolioTemplate = 'executivo' | 'especialista' | 'criativo' | 'tech';
+
 /** Configurações editáveis pelo dono (área autenticada). */
 export interface PortfolioSettings {
   published: boolean;
   headline: string | null;
   summary: string | null;
+  template: PortfolioTemplate;
+  views: number;
 }
 
 /** Projeto exposto no portfólio público (subset do Project). */
@@ -435,9 +444,20 @@ export interface PortfolioProject {
   title: string;
   description: string;
   tech: string[];
+  competencies: string[];
+  highlights: string[];
   category: string;
   link: string | null;
   repo: string | null;
+}
+
+/** Resumo para o recrutador (sidebar) — derivado de preferences + carreira. */
+export interface PortfolioRecruiter {
+  level: string | null;
+  area: string | null;
+  location: string | null;
+  remote: string | null;
+  salary: string | null;
 }
 
 // ── Job Pipeline CRM (MVC v4.0) ───────────────────────────────────
@@ -505,9 +525,16 @@ export interface PortfolioData {
   name: string;
   headline: string | null;
   summary: string | null;
+  template: PortfolioTemplate;
   /** E-mail de contato (CTA); o dono opta por publicar. */
   contactEmail: string | null;
   projects: PortfolioProject[];
   positions: LinkedInPosition[];
   education: LinkedInEducation[];
+  /** Competências agregadas dos projetos. */
+  competencies: string[];
+  /** Certificações do LinkedIn. */
+  certifications: LinkedInCertification[];
+  /** Resumo para o recrutador (sidebar). */
+  recruiter: PortfolioRecruiter;
 }
