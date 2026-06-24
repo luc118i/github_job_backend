@@ -162,51 +162,53 @@ const STATE_UF: Record<string, string> = {
 function filterByLocation(
   jobs: ProfessionJob[],
   prefs: UserPreferences | undefined,
-): ProfessionJob[] {
-  if (!prefs) return jobs;
-  if (prefs.modality === 'any' || prefs.modality === 'remote') return jobs;
+): { matched: ProfessionJob[]; outOfArea: ProfessionJob[] } {
+  const noFilter = { matched: jobs, outOfArea: [] };
+  if (!prefs) return noFilter;
+  if (prefs.modality === 'any' || prefs.modality === 'remote') return noFilter;
   const loc = prefs.location?.trim();
-  if (!loc) return jobs;
+  if (!loc) return noFilter;
 
-  // Strip diacritics so "são paulo" == "sao paulo" regardless of encoding/NFC/NFD
   const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   const locNorm = norm(loc);
 
-  // Derive the UF from the user's location string
   let userUf: string | null = null;
   for (const [name, uf] of Object.entries(STATE_UF)) {
     if (locNorm.includes(norm(name))) { userUf = uf; break; }
   }
-  // Also check if a 2-letter UF abbreviation appears at the end (e.g. "Curitiba, PR")
   if (!userUf) {
     const ufMatch = locNorm.match(/\b([a-z]{2})\s*$/);
     if (ufMatch) userUf = ufMatch[1];
   }
 
-  // City = everything before the first comma (or the whole string), diacritics stripped
   const userCity = locNorm.split(',')[0].trim();
 
-  const filtered = jobs.filter((j) => {
+  const matched: ProfessionJob[] = [];
+  const outOfArea: ProfessionJob[] = [];
+
+  for (const j of jobs) {
     const jLoc = norm(j.location ?? '').trim();
-    if (!jLoc) return true;
-    if (jLoc.includes('remot') || jLoc.includes('hibrid')) return true;
-    // Match by UF abbreviation
-    if (userUf && (jLoc.includes(` ${userUf}`) || jLoc.endsWith(userUf) || jLoc.startsWith(`${userUf} `) || jLoc === userUf)) return true;
-    // Match by city name
-    if (userCity.length > 2 && jLoc.includes(userCity)) return true;
-    // Match by full state name
-    if (userUf) {
+    let passes = false;
+    if (!jLoc) {
+      passes = true;
+    } else if (jLoc.includes('remot') || jLoc.includes('hibrid')) {
+      passes = true;
+    } else if (userUf && (jLoc.includes(` ${userUf}`) || jLoc.endsWith(userUf) || jLoc.startsWith(`${userUf} `) || jLoc === userUf)) {
+      passes = true;
+    } else if (userCity.length > 2 && jLoc.includes(userCity)) {
+      passes = true;
+    } else if (userUf) {
       for (const [name, uf] of Object.entries(STATE_UF)) {
-        if (uf === userUf && jLoc.includes(norm(name))) return true;
+        if (uf === userUf && jLoc.includes(norm(name))) { passes = true; break; }
       }
     }
-    return false;
-  });
-
-  if (filtered.length < jobs.length) {
-    console.log(`[location-filter] modality=${prefs.modality} uf="${userUf}" → ${jobs.length} → ${filtered.length} vagas`);
+    (passes ? matched : outOfArea).push(j);
   }
-  return filtered;
+
+  if (outOfArea.length > 0) {
+    console.log(`[location-filter] modality=${prefs.modality} uf="${userUf}" → ${jobs.length} total, ${matched.length} matched, ${outOfArea.length} out-of-area`);
+  }
+  return { matched, outOfArea };
 }
 
 /** Extracts the most recent job title to use as a search query. */
@@ -545,7 +547,7 @@ Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade.
     }));
 
   // Para perfis jurídicos, busca fontes especializadas em paralelo com o resultado da IA
-  const locationFilteredAiJobs = filterByLocation(aiJobs, effectivePreferences);
+  const { matched: locationFilteredAiJobs } = filterByLocation(aiJobs, effectivePreferences);
   const filteredAiJobs = filterByMaxAge(locationFilteredAiJobs, maxAge);
   console.log(`[profession] maxAge=${maxAge}d → ${aiJobs.length} vagas → ${locationFilteredAiJobs.length} após filtro de localização → ${filteredAiJobs.length} após filtro de data`);
 
@@ -758,7 +760,7 @@ Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Pa
     return null;
   }
 
-  const locationFiltered = filterByLocation(jobs, effectivePreferencesQuery);
+  const { matched: locationFiltered } = filterByLocation(jobs, effectivePreferencesQuery);
   const filteredJobs = filterByMaxAge(locationFiltered, maxAge);
   console.log(`[query] maxAge=${maxAge}d → ${jobs.length} vagas → ${locationFiltered.length} após filtro de localização → ${filteredJobs.length} após filtro de data`);
 
@@ -813,13 +815,14 @@ export async function findJobsByQuery(
   const ptBrOnly    = preferences?.ptBrOnly ?? false;
 
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
-    let jobs = filterByLocation(result.jobs, preferences);
-    jobs = filterByMaxAge(jobs, maxAgeDays);
+    const { matched, outOfArea } = filterByLocation(result.jobs, preferences);
+    let jobs = filterByMaxAge(matched, maxAgeDays);
     jobs = filterByLevel(jobs, levelPref);
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[query] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
-    return { ...result, jobs };
+    const bonusJobs = outOfArea.filter((j) => j.match >= 40).sort((a, b) => b.match - a.match).slice(0, 10);
+    return { ...result, jobs, bonusJobs: bonusJobs.length ? bonusJobs : undefined };
   }
 
   // Step 2: Gemini
@@ -1337,13 +1340,14 @@ export async function findProfessionJobs(
   const ptBrOnly    = preferences?.ptBrOnly ?? false;
 
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
-    let jobs = filterByLocation(result.jobs, preferences);
-    jobs = filterByMaxAge(jobs, maxAgeDays);
+    const { matched, outOfArea } = filterByLocation(result.jobs, preferences);
+    let jobs = filterByMaxAge(matched, maxAgeDays);
     jobs = filterByLevel(jobs, levelPref);
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[profession] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
-    return { ...result, jobs };
+    const bonusJobs = outOfArea.filter((j) => j.match >= 40).sort((a, b) => b.match - a.match).slice(0, 10);
+    return { ...result, jobs, bonusJobs: bonusJobs.length ? bonusJobs : undefined };
   }
 
   try {

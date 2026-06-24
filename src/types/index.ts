@@ -123,6 +123,8 @@ export interface ProfessionJob {
 export interface ProfessionSearchResult {
   profileSummary: string;
   jobs: ProfessionJob[];
+  /** Vagas fora dos filtros do usuário (ex: localização diferente) mas com boa compatibilidade de perfil. */
+  bonusJobs?: ProfessionJob[];
 }
 
 export interface CvRequest {
