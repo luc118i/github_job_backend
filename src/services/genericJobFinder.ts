@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
+import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionJob, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
 import { searchRemotiveJobs } from './remotive';
 import { searchGupyJobs } from './gupy';
 import { searchAdzunaJobs } from './adzuna';
@@ -125,7 +125,12 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
   const lines: string[] = [];
   const modalityLabel: Record<string, string> = { remote: 'Remoto', presencial: 'Presencial', hybrid: 'Híbrido', any: '' };
   if (prefs.modality !== 'any') lines.push(`Modalidade: ${modalityLabel[prefs.modality]}`);
-  if (prefs.location) lines.push(`Local preferido: ${prefs.location}`);
+  const isLocationStrict = (prefs.modality === 'presencial' || prefs.modality === 'hybrid') && !!prefs.location;
+  if (prefs.location) {
+    lines.push(isLocationStrict
+      ? `Local OBRIGATÓRIO: ${prefs.location} — NÃO inclua vagas de outros estados ou cidades`
+      : `Local preferido: ${prefs.location}`);
+  }
   if (prefs.salaryMin || prefs.salaryMax) {
     const range = [prefs.salaryMin && `R$ ${prefs.salaryMin}`, prefs.salaryMax && `R$ ${prefs.salaryMax}`].filter(Boolean).join(' – ');
     lines.push(`Faixa salarial: ${range}`);
@@ -133,6 +138,75 @@ function buildProfessionPrefsBlock(prefs: UserPreferences | undefined): string {
   if (prefs.level !== 'any') lines.push(`Nível: ${prefs.level}`);
   if (prefs.maxAgeDays) lines.push(`Período máximo: ${prefs.maxAgeDays} dias`);
   return lines.length ? '\nPreferências (priorize): ' + lines.join(' · ') : '';
+}
+
+// Maps full state names and common city aliases to their UF abbreviations.
+const STATE_UF: Record<string, string> = {
+  'acre': 'ac', 'alagoas': 'al', 'amapá': 'ap', 'amazonas': 'am', 'bahia': 'ba',
+  'ceará': 'ce', 'distrito federal': 'df', 'espírito santo': 'es', 'goiás': 'go',
+  'maranhão': 'ma', 'mato grosso do sul': 'ms', 'mato grosso': 'mt', 'minas gerais': 'mg',
+  'pará': 'pa', 'paraíba': 'pb', 'paraná': 'pr', 'pernambuco': 'pe', 'piauí': 'pi',
+  'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 'rio grande do sul': 'rs',
+  'rondônia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 'são paulo': 'sp',
+  'sergipe': 'se', 'tocantins': 'to',
+  // city aliases that map to a UF
+  'brasília': 'df', 'brasilia': 'df',
+};
+
+/**
+ * Hard-filter by location when modality is presencial or hybrid.
+ * Matches at state level (UF abbreviation or full state name) so that
+ * "Guará, Distrito Federal" correctly accepts jobs listed as "Brasília, DF".
+ * Jobs with no location field are kept (uncertain — benefit of the doubt).
+ */
+function filterByLocation(
+  jobs: ProfessionJob[],
+  prefs: UserPreferences | undefined,
+): ProfessionJob[] {
+  if (!prefs) return jobs;
+  if (prefs.modality === 'any' || prefs.modality === 'remote') return jobs;
+  const loc = prefs.location?.trim();
+  if (!loc) return jobs;
+
+  // Strip diacritics so "são paulo" == "sao paulo" regardless of encoding/NFC/NFD
+  const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const locNorm = norm(loc);
+
+  // Derive the UF from the user's location string
+  let userUf: string | null = null;
+  for (const [name, uf] of Object.entries(STATE_UF)) {
+    if (locNorm.includes(norm(name))) { userUf = uf; break; }
+  }
+  // Also check if a 2-letter UF abbreviation appears at the end (e.g. "Curitiba, PR")
+  if (!userUf) {
+    const ufMatch = locNorm.match(/\b([a-z]{2})\s*$/);
+    if (ufMatch) userUf = ufMatch[1];
+  }
+
+  // City = everything before the first comma (or the whole string), diacritics stripped
+  const userCity = locNorm.split(',')[0].trim();
+
+  const filtered = jobs.filter((j) => {
+    const jLoc = norm(j.location ?? '').trim();
+    if (!jLoc) return true;
+    if (jLoc.includes('remot') || jLoc.includes('hibrid')) return true;
+    // Match by UF abbreviation
+    if (userUf && (jLoc.includes(` ${userUf}`) || jLoc.endsWith(userUf) || jLoc.startsWith(`${userUf} `) || jLoc === userUf)) return true;
+    // Match by city name
+    if (userCity.length > 2 && jLoc.includes(userCity)) return true;
+    // Match by full state name
+    if (userUf) {
+      for (const [name, uf] of Object.entries(STATE_UF)) {
+        if (uf === userUf && jLoc.includes(norm(name))) return true;
+      }
+    }
+    return false;
+  });
+
+  if (filtered.length < jobs.length) {
+    console.log(`[location-filter] modality=${prefs.modality} uf="${userUf}" → ${jobs.length} → ${filtered.length} vagas`);
+  }
+  return filtered;
 }
 
 /** Extracts the most recent job title to use as a search query. */
@@ -471,8 +545,9 @@ Chame return_jobs com TODAS as vagas encontradas, sem limite fixo de quantidade.
     }));
 
   // Para perfis jurídicos, busca fontes especializadas em paralelo com o resultado da IA
-  const filteredAiJobs = filterByMaxAge(aiJobs, maxAge);
-  console.log(`[profession] maxAge=${maxAge}d → ${aiJobs.length} vagas → ${filteredAiJobs.length} após filtro de data`);
+  const locationFilteredAiJobs = filterByLocation(aiJobs, effectivePreferences);
+  const filteredAiJobs = filterByMaxAge(locationFilteredAiJobs, maxAge);
+  console.log(`[profession] maxAge=${maxAge}d → ${aiJobs.length} vagas → ${locationFilteredAiJobs.length} após filtro de localização → ${filteredAiJobs.length} após filtro de data`);
 
   if (lawProfile) {
     const lawQueries = buildLawQueries(positions, specialties, certifications);
@@ -542,6 +617,32 @@ async function prefetchDirectJobsByQuery(
   return `\n\nVAGAS PRÉ-COLETADAS (Gupy + Adzuna + Jooble + Emprega Brasil) — avalie e inclua na lista se forem relevantes:\n${list}`;
 }
 
+/**
+ * Converts a free-text suggestion phrase into a clean job search term.
+ * e.g. "trabalhar em T.I como analista" → "Analista de T.I"
+ *      "capacidade de liderança informal" → "liderança"
+ * If the query already looks like a clean job title (≤4 words, no verbs), returns as-is.
+ */
+function normalizeSearchQuery(query: string): string {
+  const q = query.trim();
+  const words = q.split(/\s+/);
+  // Already a short, clean term — use as-is
+  if (words.length <= 4) return q;
+
+  // Strip common intent prefixes (PT-BR)
+  const stripped = q
+    .replace(/^(quero\s+|gostaria\s+de\s+|trabalhar\s+(em|como|na|no)\s+|busco\s+|procuro\s+|atuar\s+(em|como|na|no)\s+)/i, '')
+    .replace(/^(vaga(s)?\s+(de|em|para)\s+)/i, '')
+    .trim();
+
+  // Extract noun phrase before "como", "em", "na", "no", "para", "com"
+  const intentMatch = stripped.match(/^(.+?)\s+(como|em|na|no|para|com)\s+/i);
+  if (intentMatch) return intentMatch[1].trim();
+
+  // Fallback: first 3 words of stripped query
+  return stripped.split(/\s+/).slice(0, 3).join(' ');
+}
+
 // ── Claude query-based search ─────────────────────────────────────
 
 async function findJobsByQueryClaude(
@@ -609,7 +710,7 @@ async function findJobsByQueryClaude(
       messages: [
         {
           role: 'user',
-          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${query}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(effectivePreferencesQuery)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABQuery ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
+          content: `Pesquise o máximo de vagas reais publicadas nos últimos ${maxAge} dias para: "${normalizeSearchQuery(query)}${(effectivePreferencesQuery?.modality === 'presencial' || effectivePreferencesQuery?.modality === 'hybrid') && effectivePreferencesQuery?.location ? ` em ${effectivePreferencesQuery.location}` : ''}". Canais: ${JOB_PLATFORMS}.${directJobsBlock}${linkedInBlock}${buildCareerProfileBlock(careerProfile)}${buildProfessionPrefsBlock(effectivePreferencesQuery)}${buildSourcePrefsBlock(blockedSources, likedSources)}${userHasOABQuery ? '\n\nRESTRIÇÃO ABSOLUTA: O candidato possui OAB e está habilitado a exercer advocacia. NÃO inclua NENHUMA vaga de estágio, estagiário, trainee, jovem aprendiz ou qualquer programa de ingresso. Retorne APENAS vagas de advogado, analista jurídico ou cargo efetivo.' : ''}
 
 Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Para cada vaga, preencha published_at com a data de publicação quando estiver visível (formato YYYY-MM-DD).`,
         },
@@ -657,8 +758,9 @@ Chame return_jobs com TODAS as vagas relevantes encontradas, sem limite fixo. Pa
     return null;
   }
 
-  const filteredJobs = filterByMaxAge(jobs, maxAge);
-  console.log(`[query] maxAge=${maxAge}d → ${jobs.length} vagas → ${filteredJobs.length} após filtro de data`);
+  const locationFiltered = filterByLocation(jobs, effectivePreferencesQuery);
+  const filteredJobs = filterByMaxAge(locationFiltered, maxAge);
+  console.log(`[query] maxAge=${maxAge}d → ${jobs.length} vagas → ${locationFiltered.length} após filtro de localização → ${filteredJobs.length} após filtro de data`);
 
   if (!filteredJobs.length) {
     console.warn(`[query] Nenhuma vaga após filtro de data (maxAge=${maxAge}d).`);
@@ -711,7 +813,8 @@ export async function findJobsByQuery(
   const ptBrOnly    = preferences?.ptBrOnly ?? false;
 
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
-    let jobs = filterByMaxAge(result.jobs, maxAgeDays);
+    let jobs = filterByLocation(result.jobs, preferences);
+    jobs = filterByMaxAge(jobs, maxAgeDays);
     jobs = filterByLevel(jobs, levelPref);
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
@@ -1235,7 +1338,8 @@ export async function findProfessionJobs(
   const ptBrOnly    = preferences?.ptBrOnly ?? false;
 
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
-    let jobs = filterByMaxAge(result.jobs, maxAgeDays);
+    let jobs = filterByLocation(result.jobs, preferences);
+    jobs = filterByMaxAge(jobs, maxAgeDays);
     jobs = filterByLevel(jobs, levelPref);
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)

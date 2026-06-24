@@ -111,6 +111,7 @@ export interface ProfessionJob {
   company: string;
   level: 'Junior' | 'Pleno' | 'Senior';
   remote: boolean;
+  location?: string | null;
   tags: string[];
   description: string;
   salary: string | null;
