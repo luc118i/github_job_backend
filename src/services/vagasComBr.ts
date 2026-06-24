@@ -17,9 +17,11 @@ function slugify(query: string): string {
   return query
     .toLowerCase()
     .normalize('NFD').replace(/\p{M}/gu, '')
+    .replace(/[/\\]/g, '-')
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
-    .replace(/\s+/g, '-');
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
 }
 
 function stripHtml(s: string): string {

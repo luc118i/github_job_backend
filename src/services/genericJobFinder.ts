@@ -1018,7 +1018,16 @@ function buildProfileDefaultQueries(
   techStack: string[] = [],
   baseQueries: string[] = [],
 ): string[] {
-  const queries = new Set<string>();
+  // Base queries (user's explicit search term) always come first
+  const priority = new Set<string>();
+  for (const q of baseQueries.filter(Boolean)) {
+    const key = normalizeKey(q);
+    const expanded = AREA_BR_EXPANSIONS[key];
+    if (expanded) expanded.slice(0, 2).forEach((e) => priority.add(e));
+    else priority.add(q);
+  }
+
+  const queries = new Set<string>(priority);
 
   // 1. Todas as desiredAreas com expansão completa
   for (const area of careerProfile?.desiredAreas ?? []) {
@@ -1057,16 +1066,6 @@ function buildProfileDefaultQueries(
   for (const tech of techStack.slice(0, 3)) {
     const q = techToPortugueseQuery(tech);
     if (q) queries.add(q);
-  }
-
-  // 6. Base queries como fallback (só se queries ainda insuficientes)
-  if (queries.size < 3) {
-    for (const q of baseQueries.filter(Boolean)) {
-      const key = normalizeKey(q);
-      const expanded = AREA_BR_EXPANSIONS[key];
-      if (expanded) expanded.slice(0, 2).forEach((e) => queries.add(e));
-      else queries.add(q);
-    }
   }
 
   // Garante ao menos uma query genérica se tudo falhou
