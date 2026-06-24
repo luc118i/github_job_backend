@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { LinkedInPosition, LinkedInEducation, LinkedInCertification, ProfessionJob, ProfessionSearchResult, UserPreferences, CareerProfile } from '../types';
 import { searchRemotiveJobs } from './remotive';
-import { searchGupyJobs } from './gupy';
+import { searchVagasComBr } from './vagasComBr';
 import { searchAdzunaJobs } from './adzuna';
 import { searchJoobleJobs } from './jooble';
 import { searchSineJobs } from './sine';
@@ -329,14 +329,14 @@ async function prefetchDirectJobs(
     queries = [title];
   }
   const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
-  const [gupy, adzuna, jooble, sine] = await Promise.all([
-    blocked.includes('gupy')           ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+  const [vagas, adzuna, jooble, sine] = await Promise.all([
+    blocked.includes('vagas.com.br')   ? Promise.resolve([]) : searchVagasComBr(queries, preferences).catch(() => []),
     blocked.includes('adzuna')         ? Promise.resolve([]) : searchAdzunaJobs(queries, preferences).catch(() => []),
     blocked.includes('jooble')         ? Promise.resolve([]) : searchJoobleJobs(queries, preferences).catch(() => []),
     blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  let jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  let jobs = [...vagas, ...adzuna, ...jooble, ...sine];
   if (excludeIntern) jobs = jobs.filter((j) => !isInternJob(j.title));
   if (!jobs.length) return '';
 
@@ -595,14 +595,14 @@ async function prefetchDirectJobsByQuery(
 ): Promise<string> {
   const blocked = (blockedSources ?? []).map((s) => s.toLowerCase());
   const queries = [query];
-  const [gupy, adzuna, jooble, sine] = await Promise.all([
-    blocked.includes('gupy')           ? Promise.resolve([]) : searchGupyJobs(queries, preferences).catch(() => []),
+  const [vagas, adzuna, jooble, sine] = await Promise.all([
+    blocked.includes('vagas.com.br')   ? Promise.resolve([]) : searchVagasComBr(queries, preferences).catch(() => []),
     blocked.includes('adzuna')         ? Promise.resolve([]) : searchAdzunaJobs(queries, preferences).catch(() => []),
     blocked.includes('jooble')         ? Promise.resolve([]) : searchJoobleJobs(queries, preferences).catch(() => []),
     blocked.includes('emprega brasil') ? Promise.resolve([]) : searchSineJobs(queries, preferences).catch(() => []),
   ]);
 
-  let jobs = [...gupy, ...adzuna, ...jooble, ...sine];
+  let jobs = [...vagas, ...adzuna, ...jooble, ...sine];
   if (excludeIntern) jobs = jobs.filter((j) => !isInternJob(j.title));
   if (!jobs.length) return '';
 
@@ -1169,8 +1169,8 @@ async function fetchDirectJobs(
     .some((a) => /ti\b|tecnologia|software|dados|dev|front|back|full|mobile|devops/i.test(a));
 
   // Busca em todas as fontes em paralelo
-  const [gupy, adzuna, jooble, sine, remotive, programathor] = await Promise.all([
-    searchGupyJobs(queries, effectivePreferences).catch((e) => { console.error('[gupy]', e); return []; }),
+  const [vagas, adzuna, jooble, sine, remotive, programathor] = await Promise.all([
+    searchVagasComBr(queries, effectivePreferences).catch((e) => { console.error('[vagas.com.br]', e); return []; }),
     searchAdzunaJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[adzuna]', e); return []; }),
     searchJoobleJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[jooble]', e); return []; }),
     searchSineJobs(queries, effectivePreferences, allBlocked).catch((e) => { console.error('[sine]', e); return []; }),
@@ -1179,14 +1179,14 @@ async function fetchDirectJobs(
   ]);
 
   // Remotive só quando usuário quer remoto ou fontes nacionais retornaram pouco
-  const nationalCount = gupy.length + adzuna.length + jooble.length + sine.length + programathor.length;
+  const nationalCount = vagas.length + adzuna.length + jooble.length + sine.length + programathor.length;
   const remotiveCap = wantRemote
     ? remotive.length
     : nationalCount < 5
       ? Math.min(remotive.length, 3)
       : 0;
 
-  const allRaw = [...gupy, ...adzuna, ...jooble, ...sine, ...programathor, ...remotive.slice(0, remotiveCap)];
+  const allRaw = [...vagas, ...adzuna, ...jooble, ...sine, ...programathor, ...remotive.slice(0, remotiveCap)];
 
   const ptBrOnly = preferences?.ptBrOnly ?? false;
 
