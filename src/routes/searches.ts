@@ -1,9 +1,34 @@
 import { Router, Response } from 'express';
 import { supabase } from '../services/supabase';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireAuth, optionalAuth, AuthRequest } from '../middleware/auth';
 import { verifyLink, resolveJobLink } from '../services/linkVerifier';
 
 const router = Router();
+
+// Última busca por texto do usuário — alimenta o "Descobrir Vagas", que
+// reaproveita o termo digitado anteriormente em vez de exigir CV.
+router.get('/last-query', optionalAuth, async (req: AuthRequest, res: Response) => {
+  if (!req.userId) {
+    res.json({ query: null, skills: [] });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('searches')
+    .select('query, skills')
+    .eq('user_id', req.userId)
+    .not('query', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    res.status(500).json({ error: 'Erro ao carregar a última busca.' });
+    return;
+  }
+
+  res.json({ query: data?.query ?? null, skills: data?.skills ?? [] });
+});
 
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   // scope=recent (usado no "organizar"): traz só a ÚLTIMA busca; se ela não

@@ -82,7 +82,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
       const { data: search, error: searchError } = await supabase
         .from('searches')
-        .insert({ github_username: null, skills, user_id: req.userId ?? null })
+        .insert({ github_username: null, skills, user_id: req.userId ?? null, query })
         .select()
         .single();
 

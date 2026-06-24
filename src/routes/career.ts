@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
 import { sendCareerMessageGroq } from '../services/groq';
+import { getTrendingSuggestions } from '../services/marketTrends';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { supabase } from '../services/supabase';
 
@@ -234,6 +235,26 @@ router.put('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 
   res.json({ ok: true });
+});
+
+// POST /career/trends — sugestões de busca em alta no mercado para o perfil
+// Body: { profile: CareerProfile }
+// Returns: { suggestions: string[] }  (vazio em caso de falha — frontend faz fallback)
+router.post('/trends', async (req: AuthRequest, res: Response) => {
+  const { profile } = req.body as { profile?: CareerProfile };
+
+  if (!profile) {
+    res.status(400).json({ error: 'profile obrigatório' });
+    return;
+  }
+
+  try {
+    const suggestions = await getTrendingSuggestions(profile);
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('[career/trends] erro:', err);
+    res.json({ suggestions: [] });
+  }
 });
 
 export default router;
