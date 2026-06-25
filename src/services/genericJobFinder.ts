@@ -821,7 +821,7 @@ export async function findJobsByQuery(
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[query] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
-    const bonusJobs = outOfArea.filter((j) => j.match >= 40).sort((a, b) => b.match - a.match).slice(0, 10);
+    const bonusJobs = outOfArea.sort((a, b) => b.match - a.match).slice(0, 15);
     return { ...result, jobs, bonusJobs: bonusJobs.length ? bonusJobs : undefined };
   }
 
@@ -1346,7 +1346,7 @@ export async function findProfessionJobs(
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[profession] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
-    const bonusJobs = outOfArea.filter((j) => j.match >= 40).sort((a, b) => b.match - a.match).slice(0, 10);
+    const bonusJobs = outOfArea.sort((a, b) => b.match - a.match).slice(0, 15);
     return { ...result, jobs, bonusJobs: bonusJobs.length ? bonusJobs : undefined };
   }
 
