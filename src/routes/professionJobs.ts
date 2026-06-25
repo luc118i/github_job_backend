@@ -37,11 +37,33 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     try {
       const result = await findJobsByQuery(query, preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername, certifications, linkedIn);
 
-      const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
+      const rawJobs    = Array.isArray(result.jobs)      ? result.jobs      : [];
+      const rawBonus   = Array.isArray(result.bonusJobs) ? result.bonusJobs : [];
 
-      // No jobs found — return immediately without touching the DB
+      // Prepara bonusJobs (sem salvar no DB — são suplementares)
+      const prepareBonus = (jobs: typeof rawBonus) =>
+        jobs.map((job) => {
+          const link = job.link || resolveJobLink(null, job.title ?? '', job.company ?? '');
+          return {
+            id: `bonus-${Math.random().toString(36).slice(2)}`,
+            title:       job.title ?? '',
+            company:     job.company ?? '',
+            level:       (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
+            remote:      job.remote ?? false,
+            location:    (job as { location?: string | null }).location ?? null,
+            skills:      Array.isArray(job.tags) ? job.tags : [],
+            description: job.description ?? '',
+            salary:      job.salary ?? null,
+            link,
+            match:       typeof job.match === 'number' ? job.match : 0,
+            link_status: 'unverified' as const,
+            seen:        false,
+          };
+        });
+
+      // No main jobs — return only bonus (skip DB)
       if (!rawJobs.length) {
-        res.json({ jobs: [], profileSummary: result.profileSummary ?? '' });
+        res.json({ jobs: [], bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary ?? '' });
         return;
       }
 
@@ -53,7 +75,6 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
           let linkStatus = await verifyLink(link);
 
           // Vaga expirada ou link inválido → substitui por busca no Indeed
-          // para que o usuário ainda consiga encontrar a oportunidade
           if (linkStatus === 'dead' || linkStatus === 'none') {
             link = resolveJobLink(null, title, company);
             linkStatus = 'unverified';
@@ -98,13 +119,12 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       const jobs = (savedJobs ?? []).map((saved, i) => ({
         ...saved,
         match: verifiedJobs[i].match,
-        // Re-attach published_at from in-memory (not stored in DB until migration is run)
         ...((verifiedJobs[i] as Record<string, unknown>)['published_at'] != null
           ? { published_at: (verifiedJobs[i] as Record<string, unknown>)['published_at'] }
           : {}),
       }));
 
-      res.json({ jobs, profileSummary: result.profileSummary });
+      res.json({ jobs, bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary });
     } catch (err) {
       console.error('[query] Error finding jobs:', err);
       const msg = err instanceof Error ? err.message.toLowerCase() : '';
@@ -126,11 +146,28 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
     const result = await findProfessionJobs(linkedIn!.positions, linkedIn!.education, linkedIn!.certifications ?? [], preferences, blockedKeywords, blockedSources, likedSources, careerProfile, githubUsername);
 
-    const rawJobs = Array.isArray(result.jobs) ? result.jobs : [];
+    const rawJobs  = Array.isArray(result.jobs)      ? result.jobs      : [];
+    const rawBonus = Array.isArray(result.bonusJobs) ? result.bonusJobs : [];
 
-    // No jobs found — return immediately without touching the DB
+    const prepareBonus = (jobs: typeof rawBonus) =>
+      jobs.map((job) => ({
+        id:          `bonus-${Math.random().toString(36).slice(2)}`,
+        title:       job.title ?? '',
+        company:     job.company ?? '',
+        level:       (['Junior', 'Pleno', 'Senior'].includes(job.level) ? job.level : 'Pleno') as 'Junior' | 'Pleno' | 'Senior',
+        remote:      job.remote ?? false,
+        location:    (job as { location?: string | null }).location ?? null,
+        skills:      Array.isArray(job.tags) ? job.tags : [],
+        description: job.description ?? '',
+        salary:      job.salary ?? null,
+        link:        job.link || resolveJobLink(null, job.title ?? '', job.company ?? ''),
+        match:       typeof job.match === 'number' ? job.match : 0,
+        link_status: 'unverified' as const,
+        seen:        false,
+      }));
+
     if (!rawJobs.length) {
-      res.json({ jobs: [], profileSummary: result.profileSummary ?? '' });
+      res.json({ jobs: [], bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary ?? '' });
       return;
     }
 
@@ -191,7 +228,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         : {}),
     }));
 
-    res.json({ jobs, profileSummary: result.profileSummary });
+    res.json({ jobs, bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary });
   } catch (err) {
     console.error('Error finding profession jobs:', err);
     const msg = err instanceof Error ? err.message.toLowerCase() : '';
