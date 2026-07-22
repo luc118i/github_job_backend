@@ -72,11 +72,17 @@ router.post('/login', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: user } = await supabase
+  const { data: user, error } = await supabase
     .from('users')
     .select('id, email, name, github_username, password_hash, linkedin_data')
     .eq('email', email.toLowerCase())
     .maybeSingle();
+
+  if (error) {
+    console.error('Erro ao consultar usuário no login:', error);
+    res.status(503).json({ error: 'Não foi possível conectar ao banco de dados. Tente novamente em instantes.' });
+    return;
+  }
 
   if (!user) {
     res.status(401).json({ error: 'E-mail ou senha incorretos' });

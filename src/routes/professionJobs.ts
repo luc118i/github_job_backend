@@ -72,7 +72,10 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
           const title   = job.title ?? '';
           const company = job.company ?? '';
           let link      = job.link || null;
-          let linkStatus = await verifyLink(link);
+
+          // Links do vagas.com.br acabaram de ser raspados — considerados frescos, sem verificação
+          const isScrapedLink = link ? (() => { try { return new URL(link!).hostname.includes('vagas.com.br'); } catch { return false; } })() : false;
+          let linkStatus = isScrapedLink ? ('trusted' as const) : await verifyLink(link);
 
           // Vaga expirada ou link inválido → substitui por busca no Indeed
           if (linkStatus === 'dead' || linkStatus === 'none') {
@@ -138,7 +141,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   }
 
   // ── Route B: LinkedIn-based search ──
-  if (!linkedIn?.positions?.length && !linkedIn?.education?.length) {
+  if (!linkedIn?.positions?.length && !linkedIn?.education?.length && !linkedIn?.skills?.length) {
     res.status(400).json({ error: 'Importe seu perfil do LinkedIn antes de buscar vagas' });
     return;
   }
@@ -176,7 +179,9 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         const title   = job.title ?? '';
         const company = job.company ?? '';
         let link      = job.link || null;
-        let linkStatus = await verifyLink(link);
+
+        const isScrapedLink = link ? (() => { try { return new URL(link!).hostname.includes('vagas.com.br'); } catch { return false; } })() : false;
+        let linkStatus = isScrapedLink ? ('trusted' as const) : await verifyLink(link);
 
         if (linkStatus === 'dead' || linkStatus === 'none') {
           link = resolveJobLink(null, title, company);

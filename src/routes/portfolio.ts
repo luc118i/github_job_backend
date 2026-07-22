@@ -79,6 +79,9 @@ async function gatherPortfolio(username: string): Promise<PortfolioData | null> 
     education: li?.education ?? [],
     competencies: competencies.slice(0, 16),
     certifications: li?.certifications ?? [],
+    skills: li?.skills ?? [],
+    languages: li?.languages ?? [],
+    objective: li?.objective ?? null,
     recruiter: buildRecruiter(
       (user.preferences as UserPreferences | null) ?? null,
       (user.career_profile as CareerProfile | null) ?? null,

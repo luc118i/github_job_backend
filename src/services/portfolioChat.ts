@@ -66,6 +66,9 @@ function buildContext(p: PortfolioData): string {
   if (p.certifications.length) {
     lines.push('Certificações: ' + p.certifications.map((c) => c.name).join('; '));
   }
+  if (p.skills.length) lines.push('Habilidades: ' + p.skills.join(', '));
+  if (p.languages.length) lines.push('Idiomas: ' + p.languages.map((l) => `${l.name}${l.level ? ` (${l.level})` : ''}`).join(', '));
+  if (p.objective) lines.push(`Objetivo profissional: ${p.objective}`);
   return lines.join('\n');
 }
 

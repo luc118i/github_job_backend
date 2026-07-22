@@ -157,6 +157,15 @@ function formatProfile(profile: CandidateProfile): string {
       );
       lines.push('Formacao:\n' + edu.join('\n'));
     }
+    if (li.skills?.length) {
+      lines.push(`Habilidades declaradas: ${li.skills.slice(0, 12).join(', ')}`);
+    }
+    if (li.languages?.length) {
+      lines.push('Idiomas: ' + li.languages.slice(0, 4).map((l) => `${l.name}${l.level ? ` (${l.level})` : ''}`).join(', '));
+    }
+    if (li.objective) {
+      lines.push(`Objetivo profissional: ${li.objective}`);
+    }
   }
 
   return lines.join('\n');
@@ -166,7 +175,7 @@ export async function analyzeJobLink(url: string, profile: CandidateProfile): Pr
   const pageContent = await fetchPageContent(url);
   const profileText = formatProfile(profile);
 
-  const hasProfile = !!(profile.skills?.length || profile.linkedIn?.positions?.length);
+  const hasProfile = !!(profile.skills?.length || profile.linkedIn?.positions?.length || profile.linkedIn?.skills?.length);
 
   const jobContext = pageContent.length > 200
     ? `CONTEUDO DA PAGINA DA VAGA:\n${pageContent}`

@@ -109,11 +109,13 @@ Contato: ${contactLine}
 ${bio}
 ${candidate.skills.length ? `Linguagens GitHub: ${candidate.skills.join(', ')}` : ''}
 ${topRepos ? `Repos: ${topRepos}` : ''}
+${candidate.objective ? `Objetivo profissional: ${candidate.objective}` : ''}
+${candidate.languages?.length ? `Idiomas: ${candidate.languages.map((l) => `${l.name}${l.level ? ` (${l.level})` : ''}`).join(', ')}` : ''}
 
-EXPERIÊNCIA PROFISSIONAL (dados reais do LinkedIn):
+EXPERIÊNCIA PROFISSIONAL (dados reais do currículo):
 ${formatPositions(candidate.positions)}
 
-FORMAÇÃO ACADÊMICA (dados reais do LinkedIn):
+FORMAÇÃO ACADÊMICA (dados reais do currículo):
 ${formatEducation(candidate.education)}
 
 FORMATO DE SAÍDA (JSON):

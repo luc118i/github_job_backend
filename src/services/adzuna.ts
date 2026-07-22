@@ -132,7 +132,7 @@ async function fetchAdzunaJobs(
   if (preferences?.maxAgeDays) params.set('max_days_old', String(preferences.maxAgeDays));
 
   // Adzuna "where" só funciona com nome de estado por extenso.
-  // "São Sebastião, DF" → "Distrito Federal" ✅  |  "São Sebastião, DF" direto → 1 resultado ❌
+  // "São Sebastião, DF" → "Distrito Federal" funciona; "São Sebastião, DF" direto retorna só 1 resultado.
   if (preferences?.location) {
     const state = extractAdzunaState(preferences.location);
     if (state) params.set('where', state);

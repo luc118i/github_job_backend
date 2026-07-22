@@ -71,6 +71,21 @@ function buildUserContext(linkedIn: LinkedInData): string {
     });
   }
 
+  if (linkedIn.skills?.length) {
+    lines.push(`Habilidades declaradas: ${linkedIn.skills.slice(0, 12).join(', ')}`);
+  }
+
+  if (linkedIn.languages?.length) {
+    lines.push('Idiomas:');
+    linkedIn.languages.slice(0, 4).forEach((l) => {
+      lines.push(`  - ${l.name}${l.level ? ` (${l.level})` : ''}`);
+    });
+  }
+
+  if (linkedIn.objective) {
+    lines.push(`Objetivo profissional: ${linkedIn.objective}`);
+  }
+
   lines.push('\nCom esse contexto, comece identificando a área principal do usuário e faça a primeira pergunta de forma personalizada — por exemplo: "Vi que você atua como [cargo] na área de [área]. Está satisfeito com esse caminho ou quer explorar algo diferente?"');
 
   return lines.join('\n');
