@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { findProfessionJobs, findJobsByQuery } from '../services/genericJobFinder';
-import { verifyLink, resolveJobLink } from '../services/linkVerifier';
+import { verifyLink, resolveJobLink, sortByLinkQuality } from '../services/linkVerifier';
 import { supabase } from '../services/supabase';
 import { CareerProfile, LinkedInData, UserPreferences } from '../types';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
@@ -63,7 +63,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
       // No main jobs — return only bonus (skip DB)
       if (!rawJobs.length) {
-        res.json({ jobs: [], bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary ?? '' });
+        res.json({ jobs: [], bonusJobs: sortByLinkQuality(prepareBonus(rawBonus)), profileSummary: result.profileSummary ?? '' });
         return;
       }
 
@@ -127,7 +127,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
           : {}),
       }));
 
-      res.json({ jobs, bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary });
+      res.json({ jobs: sortByLinkQuality(jobs), bonusJobs: sortByLinkQuality(prepareBonus(rawBonus)), profileSummary: result.profileSummary });
     } catch (err) {
       console.error('[query] Error finding jobs:', err);
       const msg = err instanceof Error ? err.message.toLowerCase() : '';
@@ -170,7 +170,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       }));
 
     if (!rawJobs.length) {
-      res.json({ jobs: [], bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary ?? '' });
+      res.json({ jobs: [], bonusJobs: sortByLinkQuality(prepareBonus(rawBonus)), profileSummary: result.profileSummary ?? '' });
       return;
     }
 
@@ -233,7 +233,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         : {}),
     }));
 
-    res.json({ jobs, bonusJobs: prepareBonus(rawBonus), profileSummary: result.profileSummary });
+    res.json({ jobs: sortByLinkQuality(jobs), bonusJobs: sortByLinkQuality(prepareBonus(rawBonus)), profileSummary: result.profileSummary });
   } catch (err) {
     console.error('Error finding profession jobs:', err);
     const msg = err instanceof Error ? err.message.toLowerCase() : '';

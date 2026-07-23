@@ -2,7 +2,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Job, JobSearchRequest, RepoContext } from '../types';
 import { AdzunaJob, searchAllQueries } from './adzuna';
 import { searchRemotiveJobs } from './remotive';
-import { searchGupyJobs } from './gupy';
 import { buildSearchQueries } from './queryBuilder';
 import { findJobsGemini } from './gemini';
 import { resolveJobLink } from './linkVerifier';
@@ -282,14 +281,11 @@ export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
   // Filter blocked sources
   const blocked = (profile.blockedSources ?? []).map((s) => s.toLowerCase());
 
-  // Fetch from all direct API sources in parallel (Adzuna requires keys; Remotive + Gupy are always free)
+  // Fetch from all direct API sources in parallel (Adzuna requires keys; Remotive is always free)
   const directSources: Promise<AdzunaJob[]>[] = [
     blocked.includes('remotive')
       ? Promise.resolve([])
       : searchRemotiveJobs(queries, profile.preferences).catch((e) => { console.warn('[remotive] erro:', e.message); return []; }),
-    blocked.includes('gupy')
-      ? Promise.resolve([])
-      : searchGupyJobs(queries, profile.preferences).catch((e) => { console.warn('[gupy] erro:', e.message); return []; }),
   ];
 
   if (process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY) {
@@ -303,7 +299,7 @@ export async function findJobs(profile: JobSearchRequest): Promise<Job[]> {
   const rawJobs = mergeRawJobs(...sourceResults);
 
   const counts = sourceResults.map((r, i) => {
-    const names = ['Remotive', 'Gupy', 'Adzuna'];
+    const names = ['Remotive', 'Adzuna'];
     return `${names[i] ?? `fonte${i}`}=${r.length}`;
   });
   console.log(`[jobs] fontes diretas: ${counts.join(', ')} → ${rawJobs.length} total`);

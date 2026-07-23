@@ -40,9 +40,27 @@ const TRUSTED_DOMAINS = new Set([
   'instagram.com',
 ]);
 
-// Domínios onde vagas expiradas retornam 200 com conteúdo indicando encerramento.
+// Domínios onde vagas expiradas retornam 200 com conteúdo indicando encerramento
+// (geralmente SPAs com roteamento client-side, onde qualquer path responde 200).
 // Para esses, fazemos GET parcial além do HEAD.
-const CONTENT_CHECK_DOMAINS = new Set(['gupy.io']);
+const CONTENT_CHECK_DOMAINS = new Set([
+  'gupy.io',
+  'greenhouse.io',
+  'lever.co',
+  'kenoby.com',
+  'workable.com',
+  'recruitee.com',
+  'bamboohr.com',
+  'smartrecruiters.com',
+  'ashbyhq.com',
+  'catho.com.br',
+  'infojobs.com.br',
+  'indeed.com',
+  'glassdoor.com',
+  'glassdoor.com.br',
+]);
+
+const INDEED_FALLBACK_PREFIX = 'https://br.indeed.com/jobs?q=';
 
 // Strings que indicam vaga fechada no HTML da página
 const CLOSED_PATTERNS = [
@@ -54,6 +72,13 @@ const CLOSED_PATTERNS = [
   /position\s+has\s+been\s+filled/i,
   /this\s+job\s+is\s+not\s+available/i,
   /processo\s+seletivo\s+encerrado/i,
+  // Soft-404 genérico: SPAs retornam 200 com uma página de erro renderizada no client.
+  /p[áa]gina\s+n[ãa]o\s+encontrada/i,
+  /page\s+not\s+found/i,
+  /<title>\s*404/i,
+  /oops[!,]?\s*(algo\s+deu\s+errado|something\s+went\s+wrong)/i,
+  /vaga\s+n[ãa]o\s+encontrada/i,
+  /job\s+not\s+found/i,
 ];
 
 const SEARCH_RESULT_PATTERNS = [
@@ -134,11 +159,36 @@ export function resolveJobLink(aiLink: string | null | undefined, title: string,
       // URL inválida
     }
   }
-  // Sanitiza title/company removendo caracteres que podem quebrar a URL
-  const safeTitle = (title ?? '').replace(/[^\w\s\-áàãâéêíóôõúüçÁÀÃÂÉÊÍÓÔÕÚÜÇ]/g, ' ').trim();
-  const safeCompany = (company ?? '').replace(/[^\w\s\-áàãâéêíóôõúüçÁÀÃÂÉÊÍÓÔÕÚÜÇ]/g, ' ').trim();
-  const q = encodeURIComponent(`${safeTitle} ${safeCompany}`.trim());
-  return `https://br.indeed.com/jobs?q=${q}&l=Brasil`;
+  // Usa apenas as primeiras 4 palavras do título como query — queries longas
+  // com nome de empresa/localidade geralmente retornam zero resultados no Indeed.
+  const cleanTitle = (title ?? '')
+    .replace(/^vagas?:\s*/i, '')
+    .replace(/[^\w\s\-áàãâéêíóôõúüçÁÀÃÂÉÊÍÓÔÕÚÜÇ]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /\w/.test(word))
+    .slice(0, 4)
+    .join(' ');
+  const q = encodeURIComponent(cleanTitle || (company ?? 'vagas').split(/\s+/).slice(0, 2).join(' '));
+  return `${INDEED_FALLBACK_PREFIX}${q}&l=Brasil`;
+}
+
+/** True quando o link é a busca genérica do Indeed usada como fallback (não uma vaga real). */
+export function isIndeedFallbackLink(link: string | null | undefined): boolean {
+  return !!link && link.startsWith(INDEED_FALLBACK_PREFIX);
+}
+
+/**
+ * Mantém a ordem relativa original, mas empurra para o final as vagas cujo link
+ * é o fallback de busca do Indeed — sem removê-las, só despriorizando na exibição.
+ */
+export function sortByLinkQuality<T extends { link?: string | null }>(jobs: T[]): T[] {
+  const direct: T[] = [];
+  const fallback: T[] = [];
+  for (const job of jobs) {
+    (isIndeedFallbackLink(job.link) ? fallback : direct).push(job);
+  }
+  return [...direct, ...fallback];
 }
 
 /** Verifica se o HTML da página indica vaga encerrada */

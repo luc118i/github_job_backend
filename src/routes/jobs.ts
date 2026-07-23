@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { findJobs } from '../services/claude';
 import { supabase } from '../services/supabase';
-import { verifyLink } from '../services/linkVerifier';
+import { verifyLink, sortByLinkQuality } from '../services/linkVerifier';
 import { JobSearchRequest } from '../types';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 
@@ -58,7 +58,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
     if (jobsError) throw new Error(jobsError.message);
 
-    res.json({ jobs: savedJobs ?? [], searchId: search.id });
+    res.json({ jobs: sortByLinkQuality(savedJobs ?? []), searchId: search.id });
   } catch (err) {
     console.error('Error finding jobs:', err);
     const msg = err instanceof Error ? err.message.toLowerCase() : '';
