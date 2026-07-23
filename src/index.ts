@@ -55,7 +55,11 @@ const authLimiter = rateLimit({
 
 app.get('/health', (_req, res) => res.sendStatus(200));
 
-app.use('/auth', authLimiter, authRouter);
+// authLimiter só nas rotas sensíveis a força bruta — não pode travar /me, /profile,
+// /linkedin, /preferences, que rodam a cada carregamento de página e edição de perfil.
+app.use('/auth/login', authLimiter);
+app.use('/auth/register', authLimiter);
+app.use('/auth', authRouter);
 app.use('/jobs', heavyLimiter, jobsRouter);
 app.use('/searches', searchesRouter);
 app.use('/cv', heavyLimiter, cvRouter);
