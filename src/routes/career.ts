@@ -60,7 +60,8 @@ function buildUserContext(linkedIn: LinkedInData): string {
   if (linkedIn.education?.length) {
     lines.push('Formação:');
     linkedIn.education.slice(0, 2).forEach((e) => {
-      lines.push(`  - ${e.degree ?? 'Curso'} em ${e.school}`);
+      const course = [e.degree, e.fieldOfStudy].filter(Boolean).join(' em ') || 'Curso';
+      lines.push(`  - ${course} em ${e.school}`);
     });
   }
 

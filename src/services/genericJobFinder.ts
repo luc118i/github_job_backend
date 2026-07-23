@@ -39,7 +39,7 @@ function formatPositions(positions: LinkedInPosition[]): string {
 function formatEducation(education: LinkedInEducation[]): string {
   if (!education.length) return 'Sem formação';
   return education.slice(0, 2).map((e) =>
-    `${e.degree ?? 'Curso'}, ${e.school}${e.endDate ? ` ${e.endDate}` : ''}`
+    `${[e.degree, e.fieldOfStudy].filter(Boolean).join(' em ') || 'Curso'}, ${e.school}${e.endDate ? ` ${e.endDate}` : ''}`
   ).join('; ');
 }
 

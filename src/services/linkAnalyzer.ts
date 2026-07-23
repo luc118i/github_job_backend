@@ -153,7 +153,7 @@ function formatProfile(profile: CandidateProfile): string {
     }
     if (li.education?.length) {
       const edu = li.education.slice(0, 2).map((e: LinkedInEducation) =>
-        `  - ${e.degree ?? 'Curso'}, ${e.school}${e.endDate ? ' (' + e.endDate + ')' : ''}`
+        `  - ${[e.degree, e.fieldOfStudy].filter(Boolean).join(' em ') || 'Curso'}, ${e.school}${e.endDate ? ' (' + e.endDate + ')' : ''}`
       );
       lines.push('Formacao:\n' + edu.join('\n'));
     }

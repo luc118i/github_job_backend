@@ -35,6 +35,7 @@ function parseEducation(zip: AdmZip): LinkedInEducation[] {
   return records.map((r) => ({
     school: r['School Name'] ?? '',
     degree: r['Degree Name'] || null,
+    fieldOfStudy: r['Field Of Study'] || null,
     startDate: r['Start Date'] || null,
     endDate: r['End Date'] || null,
     notes: r['Notes'] || null,

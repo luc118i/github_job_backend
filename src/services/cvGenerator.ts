@@ -67,7 +67,8 @@ function formatEducation(education: LinkedInEducation[]): string {
   return education.map((e) => {
     const period = [e.startDate, e.endDate].filter(Boolean).join(' – ');
     const notes = e.notes ? ` — ${e.notes.slice(0, 80)}` : '';
-    return `- **${e.degree ?? 'Curso'}** @ ${e.school}${period ? ` (${period})` : ''}${notes}`;
+    const course = [e.degree, e.fieldOfStudy].filter(Boolean).join(' em ') || 'Curso';
+    return `- **${course}** @ ${e.school}${period ? ` (${period})` : ''}${notes}`;
   }).join('\n');
 }
 

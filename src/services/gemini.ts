@@ -110,7 +110,7 @@ export async function findProfessionJobsGemini(
     : 'Sem experiência';
 
   const formattedEducation = education.length
-    ? education.slice(0, 2).map((e) => `${e.degree ?? 'Curso'}, ${e.school}`).join('; ')
+    ? education.slice(0, 2).map((e) => `${[e.degree, e.fieldOfStudy].filter(Boolean).join(' em ') || 'Curso'}, ${e.school}`).join('; ')
     : 'Sem formação';
 
   const maxAge = preferences?.maxAgeDays ?? 90;

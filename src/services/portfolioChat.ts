@@ -61,7 +61,7 @@ function buildContext(p: PortfolioData): string {
     }
   }
   if (p.education.length) {
-    lines.push('Formação: ' + p.education.map((ed) => `${ed.degree ?? ''} ${ed.school}`.trim()).join('; '));
+    lines.push('Formação: ' + p.education.map((ed) => `${[ed.degree, ed.fieldOfStudy].filter(Boolean).join(' em ')} ${ed.school}`.trim()).join('; '));
   }
   if (p.certifications.length) {
     lines.push('Certificações: ' + p.certifications.map((c) => c.name).join('; '));

@@ -37,7 +37,7 @@ const RESUME_PROMPT = (text: string) => `Extraia dados do currículo abaixo. Ret
     {"company": "string", "title": "string", "description": "string|null", "location": "string|null", "startedOn": "string", "finishedOn": "string|null"}
   ],
   "education": [
-    {"school": "string", "degree": "string|null", "startDate": "string|null", "endDate": "string|null", "notes": "string|null"}
+    {"school": "string", "degree": "string|null (ex: Tecnólogo, Bacharelado)", "fieldOfStudy": "string|null (ex: Análise e Desenvolvimento de Sistemas)", "startDate": "string|null", "endDate": "string|null", "notes": "string|null"}
   ],
   "certifications": [
     {"name": "string", "authority": "string|null", "licenseNumber": "string|null", "startedOn": "string|null", "finishedOn": "string|null"}
@@ -98,6 +98,7 @@ const EXTRACT_RESUME_TOOL: Groq.Chat.ChatCompletionTool = {
             properties: {
               school: { type: 'string' },
               degree: { type: ['string', 'null'] },
+              fieldOfStudy: { type: ['string', 'null'] },
               startDate: { type: ['string', 'null'] },
               endDate: { type: ['string', 'null'] },
               notes: { type: ['string', 'null'] },
