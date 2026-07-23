@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { parseLinkedInZip } from '../services/linkedInParser';
 import { parseLinkedInPdf } from '../services/linkedInPdfParser';
+import { parseResumeText } from '../services/resumeParser';
 
 const router = Router();
 
@@ -29,7 +30,24 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     res.json(data);
   } catch (err) {
     console.error('LinkedIn parse error:', err);
-    res.status(422).json({ error: 'Arquivo inválido. Envie o PDF ou ZIP exportado pelo LinkedIn.' });
+    res.status(422).json({ error: 'Arquivo inválido. Envie um PDF de currículo ou o .zip exportado pelo LinkedIn.' });
+  }
+});
+
+router.post('/import-text', async (req: Request, res: Response) => {
+  const { text } = req.body as { text?: string };
+
+  if (!text || !text.trim()) {
+    res.status(400).json({ error: 'Cole o texto do currículo' });
+    return;
+  }
+
+  try {
+    const data = await parseResumeText(text);
+    res.json(data);
+  } catch (err) {
+    console.error('Resume text parse error:', err);
+    res.status(422).json({ error: 'Não foi possível interpretar o texto colado. Tente novamente.' });
   }
 });
 
