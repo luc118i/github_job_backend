@@ -13,8 +13,8 @@ function getGroq(): Groq {
 
 const GROQ_MODELS = [
   'llama-3.3-70b-versatile',
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'openai/gpt-oss-120b',
+  'llama-3.1-8b-instant',
 ];
 
 function normalize(parsed: Partial<LinkedInData>): LinkedInData {
@@ -144,7 +144,8 @@ async function parseResumeGroq(text: string): Promise<LinkedInData> {
     } catch (err) {
       const msg = (err as Error).message ?? '';
       const status = (err as { status?: number }).status;
-      const retryable = status === 429 || status === 503 || status === 404 || msg.includes('JSON') || msg.includes('extract_resume');
+      const retryable = status === 429 || status === 503 || status === 404 ||
+        msg.includes('JSON') || msg.includes('extract_resume') || msg.includes('tool_use_failed') || msg.includes('did not call a tool');
       if (retryable) {
         console.warn(`[resume/groq] ${model} falhou (${msg}), tentando próximo...`);
         lastErr = err;

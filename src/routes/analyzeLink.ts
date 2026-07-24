@@ -10,13 +10,15 @@ const router = Router();
 router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   const {
     url,
+    text,
     githubUsername,
     githubBio,
     skills,
     repos,
     linkedIn,
   } = req.body as {
-    url: string;
+    url?: string;
+    text?: string;
     githubUsername?: string;
     githubBio?: string | null;
     skills?: string[];
@@ -24,16 +26,19 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
     linkedIn?: LinkedInData | null;
   };
 
-  if (!url || !url.startsWith('http')) {
-    res.status(400).json({ error: 'URL inválida. Informe um endereço começando com http:// ou https://' });
+  const hasUrl = !!url && url.startsWith('http');
+  const hasText = !!text && text.trim().length > 0;
+
+  if (!hasUrl && !hasText) {
+    res.status(400).json({ error: 'Informe uma URL válida (começando com http:// ou https://) ou cole a descrição da vaga.' });
     return;
   }
 
   try {
     const profile: CandidateProfile = { githubUsername, githubBio, skills, repos, linkedIn };
-    const { job, match } = await analyzeJobLink(url, profile);
+    const { job, match } = await analyzeJobLink({ url: hasUrl ? url : undefined, text: hasText ? text : undefined }, profile);
 
-    const linkStatus = await verifyLink(url);
+    const linkStatus = hasUrl ? await verifyLink(url!) : 'none';
 
     const { data: search, error: searchError } = await supabase
       .from('searches')
@@ -55,7 +60,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
         skills: job.skills,
         description: job.description,
         salary: job.salary,
-        link: url,
+        link: hasUrl ? url : null,
         link_status: linkStatus === 'none' ? 'unverified' : linkStatus,
         seen: true,
       })
@@ -70,6 +75,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       atsKeywords: job.atsKeywords,
       requirements: job.requirements,
       language: job.language,
+      contactEmail: job.contactEmail,
     });
   } catch (err) {
     console.error('[analyze-link] erro:', err);

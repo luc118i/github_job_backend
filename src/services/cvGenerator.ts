@@ -17,8 +17,8 @@ function getGroq(): Groq {
 // na mesma ordem usada no career chat, caso algum seja descontinuado/indisponível.
 const GROQ_CV_MODELS = [
   'llama-3.3-70b-versatile',
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'openai/gpt-oss-120b',
+  'llama-3.1-8b-instant',
 ];
 
 const SYSTEM_PROMPT = `Você é um especialista em RH e otimização de currículos para ATS (Applicant Tracking System).
@@ -108,7 +108,7 @@ Descrição: ${shortDesc}
 CANDIDATO: ${candidate.name}
 Contato: ${contactLine}
 ${bio}
-${candidate.skills.length ? `Linguagens GitHub: ${candidate.skills.join(', ')}` : ''}
+${candidate.skills.length ? `Skills registradas no perfil do candidato (podem incluir linguagens de programação do GitHub e outras habilidades — use com discernimento, ver regras abaixo): ${candidate.skills.join(', ')}` : ''}
 ${topRepos ? `Repos: ${topRepos}` : ''}
 ${candidate.objective ? `Objetivo profissional: ${candidate.objective}` : ''}
 ${candidate.languages?.length ? `Idiomas: ${candidate.languages.map((l) => `${l.name}${l.level ? ` (${l.level})` : ''}`).join(', ')}` : ''}
@@ -123,7 +123,7 @@ FORMATO DE SAÍDA (JSON):
 {
   "blocks": [
     { "type": "resumo", "content": "<parágrafo único usando keywords exatas: \\"${job.title}\\", \\"${job.skills.slice(0, 3).join('\\", \\"')}\\">" },
-    { "type": "skills", "content": "**Linguagens:** ...\\n**Ferramentas:** Git, GitHub, ..." },
+    { "type": "skills", "content": "<ver regra de relevância abaixo — formato varia conforme a área da vaga>" },
     { "type": "experiencia", "content": "<bullets '- ' com verbos de ação a partir dos dados reais; se vazio, '- [PREENCHER]'>" },
     { "type": "projetos", "content": "<bullets '- ' dos repos reais acima, com tecnologia e link>" },
     { "type": "formacao", "content": "<bullets '- ' a partir dos dados reais; se vazio, '- [PREENCHER]'>" }
@@ -134,6 +134,9 @@ Regras:
 - "type" só pode ser: resumo, skills, experiencia, projetos, formacao, certificacoes, idiomas.
 - "content" é texto/Markdown (use '- ' para listas, '**' para negrito). Sem títulos '#' dentro do content.
 - Inclua certificacoes/idiomas APENAS se houver dados reais para isso.
+- CRITICO — relevância por área no bloco "skills": monte esse bloco com base na área da vaga, não apenas copiando as skills do perfil.
+  - Se a vaga é de tecnologia/desenvolvimento e as skills do perfil (linguagens, frameworks) forem relevantes, use o formato "**Linguagens:** ...\\n**Ferramentas:** ...".
+  - Se a vaga é de outra área (ex: almoxarife, vendas, administrativo, logística) e as linguagens de programação do perfil NÃO têm relação com a vaga, NÃO as liste nesse bloco — monte a seção com habilidades reais e relevantes extraídas da experiência profissional do candidato (ex: "Controle de estoque", "Gestão logística") e, se houver, competências comportamentais citadas no perfil. Nunca force tecnologias irrelevantes só porque estão no perfil do GitHub.
 - NUNCA invente dados. Sem tabelas. Sem emojis.`;
 }
 
@@ -317,6 +320,7 @@ REGRAS CRÍTICAS:
 - Pode reescrever frases, reordenar bullets e enfatizar o que casa com a vaga.
 - Use verbos de ação no início dos bullets.
 - Priorize incluir, quando fizer sentido com a experiência real, estas palavras-chave: ${job.skills.join(', ')}.
+- No bloco "skills": remova tecnologias/linguagens que não têm nenhuma relação com a área desta vaga (ex: linguagens de programação num currículo sendo adaptado para uma vaga de área totalmente diferente) — substitua por habilidades reais do candidato (extraídas dos outros blocos) que façam sentido para esta vaga.
 - Sem emojis, sem tabelas. Retorne APENAS JSON {"blocks":[{"type","title","content"}]}.
 
 VAGA: ${job.title} | ${job.level} | ${job.remote ? 'Remoto' : 'Presencial'}
