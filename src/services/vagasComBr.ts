@@ -44,7 +44,10 @@ function parseJobBlocks(html: string): AdzunaJob[] {
     const titleM = block.match(/title="([^"]+)"[^>]*href="(\/vagas\/[^"]+)"/);
     if (!titleM) continue;
 
-    const title   = titleM[1].trim();
+    const title   = titleM[1].trim()
+      .replace(/^vagas?:\s*/i, '')   // remove "Vagas:" prefix injected by the page
+      .replace(/\s+-\s+[A-Z].*$/, '') // strip " - CompanyName" suffix when present
+      .trim();
     const url     = BASE_URL + titleM[2].trim();
 
     const companyM  = block.match(/class="emprVaga"\s*>\s*([^\n<]+)/);

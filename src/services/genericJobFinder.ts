@@ -817,7 +817,9 @@ export async function findJobsByQuery(
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
     const { matched, outOfArea } = filterByLocation(result.jobs, preferences);
     let jobs = filterByMaxAge(matched, maxAgeDays);
-    jobs = filterByLevel(jobs, levelPref);
+    const afterLevel = filterByLevel(jobs, levelPref);
+    // Se o filtro de nível zerar os resultados, ignora-o (melhor mostrar algo do que nada)
+    jobs = afterLevel.length > 0 ? afterLevel : jobs;
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[query] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
@@ -1342,7 +1344,9 @@ export async function findProfessionJobs(
   function applyPreferenceFilters(result: ProfessionSearchResult): ProfessionSearchResult {
     const { matched, outOfArea } = filterByLocation(result.jobs, preferences);
     let jobs = filterByMaxAge(matched, maxAgeDays);
-    jobs = filterByLevel(jobs, levelPref);
+    const afterLevel = filterByLevel(jobs, levelPref);
+    // Se o filtro de nível zerar os resultados, ignora-o (melhor mostrar algo do que nada)
+    jobs = afterLevel.length > 0 ? afterLevel : jobs;
     jobs = filterByPtBr(jobs, ptBrOnly);
     if (jobs.length !== result.jobs.length)
       console.log(`[profession] pref-filters (age=${maxAgeDays}d level=${levelPref} ptBr=${ptBrOnly}) → ${result.jobs.length} → ${jobs.length}`);
