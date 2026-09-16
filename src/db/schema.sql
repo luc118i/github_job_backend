@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_github_username ON users (github_username);
 
+-- Legado (versão anterior do app, sem uso no código atual) — mantido só p/ não perder dados históricos.
+-- CREATE TABLE IF NOT EXISTS é no-op se a tabela já existe, então colunas novas em
+-- tabelas existentes SEMPRE precisam de ALTER TABLE ADD COLUMN IF NOT EXISTS explícito.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial JSONB;
+
 -- ── searches ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS searches (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,6 +43,10 @@ CREATE TABLE IF NOT EXISTS searches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_searches_user ON searches (user_id, created_at DESC);
+
+-- Legado (versão anterior do app, sem uso no código atual) — mantido só p/ não perder dados históricos.
+ALTER TABLE searches ADD COLUMN IF NOT EXISTS linkedin_name TEXT;
+ALTER TABLE searches ADD COLUMN IF NOT EXISTS linkedin_email TEXT;
 
 -- ── jobs ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS jobs (
