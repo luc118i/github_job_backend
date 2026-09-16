@@ -2,6 +2,7 @@ import './env-setup'; // MUST be first — loads .env before any module reads pr
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { heavyLimiter } from './middleware/rateLimiters';
 import jobsRouter from './routes/jobs';
 import searchesRouter from './routes/searches';
 import cvRouter from './routes/cv';
@@ -35,15 +36,6 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }));
 
 // ── Rate limiting ────────────────────────────────────────────────────
-// Rotas públicas pesadas (consomem créditos de IA) — 20 req/15min por IP
-const heavyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Muitas requisições. Aguarde alguns minutos e tente novamente.' },
-});
-
 // Auth — 10 tentativas de login por 15min por IP (anti-brute-force)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

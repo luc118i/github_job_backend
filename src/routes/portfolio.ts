@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { heavyLimiter } from '../middleware/rateLimiters';
 import { PortfolioData, PortfolioProject, PortfolioRecruiter, PortfolioTemplate, LinkedInData, CareerProfile, UserPreferences } from '../types';
 import { askAboutCandidate, PortfolioChatTurn } from '../services/portfolioChat';
 import { generatePortfolioTexts } from '../services/portfolioGenerator';
@@ -107,7 +108,9 @@ router.get('/public/:username', async (req: Request, res: Response) => {
 });
 
 // POST /portfolio/public/:username/ask — chat "Pergunte sobre mim" (sem auth).
-router.post('/public/:username/ask', async (req: Request, res: Response) => {
+// heavyLimiter aqui pois é a única rota pública deste router que chama IA
+// (o /portfolio inteiro roda sem o limiter global — /settings e /generate já exigem login).
+router.post('/public/:username/ask', heavyLimiter, async (req: Request, res: Response) => {
   const username = String(req.params.username ?? '').trim();
   const { question, history } = req.body as { question?: string; history?: PortfolioChatTurn[] };
   if (!question || !question.trim()) {
