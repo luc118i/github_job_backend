@@ -1,9 +1,17 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes, createHash } from 'crypto';
 import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { LinkedInData } from '../types';
+import { sendEmail, buildResetPasswordEmail } from '../services/email';
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hora
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 const router = Router();
 
@@ -194,6 +202,111 @@ router.patch('/linkedin', requireAuth, async (req: AuthRequest, res: Response) =
     res.status(500).json({ error: 'Erro ao atualizar perfil' });
     return;
   }
+
+  res.json({ ok: true });
+});
+
+// POST /auth/check-email — diz se já existe conta com esse e-mail.
+// Usado no front pra alternar entre "entrar" e "criar conta" automaticamente.
+router.post('/check-email', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  if (!email || !email.trim()) {
+    res.status(400).json({ error: 'E-mail é obrigatório' });
+    return;
+  }
+
+  const { data: rows, error } = await db('SELECT id FROM users WHERE email = $1', [email.trim().toLowerCase()]);
+
+  if (error) {
+    res.status(503).json({ error: 'Não foi possível verificar o e-mail. Tente novamente.' });
+    return;
+  }
+
+  res.json({ exists: rows.length > 0 });
+});
+
+// POST /auth/forgot-password — gera um token de redefinição e envia por e-mail.
+// Sempre responde { ok: true } (mesmo se o e-mail não existir) pra não revelar
+// quais e-mails têm conta através desse endpoint especificamente.
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  if (!email || !email.trim()) {
+    res.status(400).json({ error: 'E-mail é obrigatório' });
+    return;
+  }
+
+  const { data: userRows, error } = await db('SELECT id, email FROM users WHERE email = $1', [email.trim().toLowerCase()]);
+  if (error) {
+    res.status(503).json({ error: 'Não foi possível processar o pedido. Tente novamente.' });
+    return;
+  }
+
+  const user = userRows[0];
+  if (user) {
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+
+    const { error: insertError } = await db(
+      'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+      [user.id, hashToken(token), expiresAt],
+    );
+
+    if (!insertError) {
+      const frontendUrl = (process.env.FRONTEND_URL ?? 'http://localhost:5173').split(',')[0].trim();
+      const resetUrl = `${frontendUrl}/?reset=${token}`;
+      const { subject, html } = buildResetPasswordEmail(resetUrl);
+      try {
+        await sendEmail({ to: user.email as string, subject, html });
+      } catch (err) {
+        console.error('[forgot-password] falha ao enviar e-mail:', err);
+      }
+    } else {
+      console.error('[forgot-password] falha ao criar token:', insertError);
+    }
+  }
+
+  res.json({ ok: true });
+});
+
+// POST /auth/reset-password — troca a senha usando o token recebido por e-mail.
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { token, newPassword } = req.body as { token?: string; newPassword?: string };
+
+  if (!token || !newPassword) {
+    res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
+    return;
+  }
+  if (newPassword.length < 6) {
+    res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres' });
+    return;
+  }
+
+  const { data: tokenRows, error } = await db(
+    `SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = $1`,
+    [hashToken(token)],
+  );
+
+  if (error) {
+    res.status(503).json({ error: 'Não foi possível redefinir a senha. Tente novamente.' });
+    return;
+  }
+
+  const resetToken = tokenRows[0];
+  const expired = !resetToken || resetToken.used_at || new Date(resetToken.expires_at as string) < new Date();
+  if (expired) {
+    res.status(400).json({ error: 'Link de redefinição inválido ou expirado. Solicite um novo.' });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+
+  const { error: updateError } = await db('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, resetToken.user_id]);
+  if (updateError) {
+    res.status(500).json({ error: 'Erro ao redefinir a senha' });
+    return;
+  }
+
+  await db('UPDATE password_reset_tokens SET used_at = now() WHERE id = $1', [resetToken.id]);
 
   res.json({ ok: true });
 });

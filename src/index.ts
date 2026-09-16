@@ -59,6 +59,9 @@ app.get('/health', (_req, res) => res.sendStatus(200));
 // /linkedin, /preferences, que rodam a cada carregamento de página e edição de perfil.
 app.use('/auth/login', authLimiter);
 app.use('/auth/register', authLimiter);
+app.use('/auth/check-email', authLimiter);
+app.use('/auth/forgot-password', authLimiter);
+app.use('/auth/reset-password', authLimiter);
 app.use('/auth', authRouter);
 app.use('/jobs', heavyLimiter, jobsRouter);
 app.use('/searches', searchesRouter);
