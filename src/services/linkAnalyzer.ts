@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import Groq from 'groq-sdk';
 import { LinkedInPosition, LinkedInEducation, LinkedInData } from '../types';
+import { safeFetch } from '../utils/ssrfGuard';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -126,7 +127,7 @@ async function fetchPageContent(url: string): Promise<string> {
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

@@ -1,4 +1,5 @@
 import { LinkStatus } from '../types';
+import { safeFetch } from '../utils/ssrfGuard';
 
 const TRUSTED_DOMAINS = new Set([
   'gupy.io',
@@ -194,9 +195,8 @@ export function sortByLinkQuality<T extends { link?: string | null }>(jobs: T[])
 /** Verifica se o HTML da página indica vaga encerrada */
 async function isClosedContent(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       method: 'GET',
-      redirect: 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Range': 'bytes=0-12000', // só os primeiros 12KB — suficiente para o título/status
@@ -236,10 +236,9 @@ export async function verifyLink(url: string | null): Promise<LinkStatus> {
     // HEAD rápido primeiro
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeout);
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       method: 'HEAD',
       signal: controller.signal,
-      redirect: 'follow',
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobFinder/1.0)' },
     });
     clearTimeout(tid);
