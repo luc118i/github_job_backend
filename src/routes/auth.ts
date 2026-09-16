@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { LinkedInData } from '../types';
 
@@ -29,32 +29,24 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: existing } = await supabase
-    .from('users')
-    .select('id')
-    .eq('email', email.toLowerCase())
-    .maybeSingle();
+  const { data: existingRows } = await db('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
 
-  if (existing) {
+  if (existingRows[0]) {
     res.status(409).json({ error: 'Este e-mail já tem uma conta. Faça login.' });
     return;
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
 
-  const { data: user, error } = await supabase
-    .from('users')
-    .insert({
-      email: email.toLowerCase(),
-      name: linkedInData.name,
-      phone: linkedInData.phone,
-      password_hash: passwordHash,
-      linkedin_data: linkedInData,
-    })
-    .select('id, email, name, github_username')
-    .single();
+  const { data: userRows, error } = await db(
+    `INSERT INTO users (email, name, phone, password_hash, linkedin_data)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, email, name, github_username`,
+    [email.toLowerCase(), linkedInData.name, linkedInData.phone, passwordHash, JSON.stringify(linkedInData)],
+  );
+  const user = userRows[0];
 
-  if (error) {
+  if (error || !user) {
     console.error('Erro ao criar usuário:', error);
     res.status(500).json({ error: 'Erro ao criar conta' });
     return;
@@ -72,11 +64,11 @@ router.post('/login', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('id, email, name, github_username, password_hash, linkedin_data')
-    .eq('email', email.toLowerCase())
-    .maybeSingle();
+  const { data: userRows, error } = await db(
+    'SELECT id, email, name, github_username, password_hash, linkedin_data FROM users WHERE email = $1',
+    [email.toLowerCase()],
+  );
+  const user = userRows[0];
 
   if (error) {
     console.error('Erro ao consultar usuário no login:', error);
@@ -104,11 +96,11 @@ router.post('/login', async (req: Request, res: Response) => {
 
 // GET /auth/me
 router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { data: user } = await supabase
-    .from('users')
-    .select('id, email, name, github_username, linkedin_data')
-    .eq('id', req.userId!)
-    .maybeSingle();
+  const { data: userRows } = await db(
+    'SELECT id, email, name, github_username, linkedin_data FROM users WHERE id = $1',
+    [req.userId!],
+  );
+  const user = userRows[0];
 
   if (!user) {
     res.status(404).json({ error: 'Usuário não encontrado' });
@@ -125,21 +117,22 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
 router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
   const { name, github_username } = req.body as { name?: string | null; github_username?: string | null };
 
-  const updateData: Record<string, unknown> = {};
-  if (name !== undefined) updateData.name = name || null;
-  if (github_username !== undefined) updateData.github_username = github_username || null;
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (name !== undefined) { params.push(name || null); sets.push(`name = $${params.length}`); }
+  if (github_username !== undefined) { params.push(github_username || null); sets.push(`github_username = $${params.length}`); }
 
-  if (Object.keys(updateData).length === 0) {
+  if (sets.length === 0) {
     res.status(400).json({ error: 'Nenhum campo para atualizar' });
     return;
   }
 
-  const { data: user, error } = await supabase
-    .from('users')
-    .update(updateData)
-    .eq('id', req.userId!)
-    .select('id, email, name, github_username')
-    .single();
+  params.push(req.userId!);
+  const { data: userRows, error } = await db(
+    `UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id, email, name, github_username`,
+    params,
+  );
+  const user = userRows[0];
 
   if (error || !user) {
     res.status(500).json({ error: 'Erro ao atualizar perfil' });
@@ -151,11 +144,8 @@ router.patch('/profile', requireAuth, async (req: AuthRequest, res: Response) =>
 
 // GET /auth/preferences — lê preferências de filtragem do usuário
 router.get('/preferences', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { data: user } = await supabase
-    .from('users')
-    .select('preferences')
-    .eq('id', req.userId!)
-    .maybeSingle();
+  const { data: userRows } = await db('SELECT preferences FROM users WHERE id = $1', [req.userId!]);
+  const user = userRows[0];
 
   res.json({ preferences: (user?.preferences as Record<string, unknown>) ?? {} });
 });
@@ -176,10 +166,7 @@ router.patch('/preferences', requireAuth, async (req: AuthRequest, res: Response
     return;
   }
 
-  const { error } = await supabase
-    .from('users')
-    .update({ preferences })
-    .eq('id', req.userId!);
+  const { error } = await db('UPDATE users SET preferences = $1 WHERE id = $2', [JSON.stringify(preferences), req.userId!]);
 
   if (error) {
     res.status(500).json({ error: 'Erro ao salvar preferências' });
@@ -198,10 +185,10 @@ router.patch('/linkedin', requireAuth, async (req: AuthRequest, res: Response) =
     return;
   }
 
-  const { error } = await supabase
-    .from('users')
-    .update({ linkedin_data: linkedInData, name: linkedInData.name, phone: linkedInData.phone })
-    .eq('id', req.userId!);
+  const { error } = await db(
+    'UPDATE users SET linkedin_data = $1, name = $2, phone = $3 WHERE id = $4',
+    [JSON.stringify(linkedInData), linkedInData.name, linkedInData.phone, req.userId!],
+  );
 
   if (error) {
     res.status(500).json({ error: 'Erro ao atualizar perfil' });

@@ -3,7 +3,7 @@ import { CareerChatMessage, CareerProfile, LinkedInData } from '../types';
 import { sendCareerMessageGroq } from '../services/groq';
 import { getTrendingSuggestions } from '../services/marketTrends';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 
 const router = Router();
 
@@ -221,11 +221,11 @@ router.post('/refine', async (req: AuthRequest, res: Response) => {
 
 // GET /career/profile — retorna o perfil salvo do usuário autenticado
 router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { data, error } = await supabase
-    .from('users')
-    .select('career_profile')
-    .eq('id', req.userId!)
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    'SELECT career_profile FROM users WHERE id = $1',
+    [req.userId!],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: 'Erro ao buscar perfil' });
@@ -239,10 +239,10 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
 router.put('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
   const { profile } = req.body as { profile: CareerProfile | null };
 
-  const { error } = await supabase
-    .from('users')
-    .update({ career_profile: profile ?? null })
-    .eq('id', req.userId!);
+  const { error } = await db(
+    'UPDATE users SET career_profile = $1 WHERE id = $2',
+    [profile != null ? JSON.stringify(profile) : null, req.userId!],
+  );
 
   if (error) {
     console.error('[career/profile] erro ao salvar:', error);

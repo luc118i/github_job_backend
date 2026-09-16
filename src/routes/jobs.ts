@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { findJobs } from '../services/claude';
-import { supabase } from '../services/supabase';
+import { db, insertRows } from '../services/db';
 import { verifyLink, sortByLinkQuality } from '../services/linkVerifier';
 import { JobSearchRequest } from '../types';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
@@ -16,19 +16,15 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const { data: search, error: searchError } = await supabase
-      .from('searches')
-      .insert({
-        github_username: profile.username,
-        skills: profile.skills,
-        user_id: req.userId ?? null,
-      })
-      .select()
-      .single();
+    const { data: searchRows, error: searchError } = await db(
+      `INSERT INTO searches (github_username, skills, user_id) VALUES ($1, $2, $3) RETURNING *`,
+      [profile.username, JSON.stringify(profile.skills), req.userId ?? null],
+    );
+    const search = searchRows[0];
 
-    if (searchError) {
-      console.error('Supabase insert error:', JSON.stringify(searchError));
-      throw new Error(searchError.message || searchError.code || 'Supabase insert failed');
+    if (searchError || !search) {
+      console.error('Erro ao inserir search:', searchError);
+      throw new Error(searchError?.message || 'Falha ao inserir busca');
     }
 
     const rawJobs = await findJobs(profile);
@@ -51,10 +47,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
       }))
     );
 
-    const { data: savedJobs, error: jobsError } = await supabase
-      .from('jobs')
-      .insert(verifiedJobs)
-      .select();
+    const { data: savedJobs, error: jobsError } = await insertRows('jobs', verifiedJobs);
 
     if (jobsError) throw new Error(jobsError.message);
 
@@ -75,10 +68,7 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 });
 
 router.patch('/:id/seen', async (req: Request, res: Response) => {
-  const { error } = await supabase
-    .from('jobs')
-    .update({ seen: true })
-    .eq('id', req.params.id);
+  const { error } = await db('UPDATE jobs SET seen = true WHERE id = $1', [req.params.id]);
 
   if (error) {
     res.status(500).json({ error: 'Erro ao marcar vaga' });
@@ -89,10 +79,7 @@ router.patch('/:id/seen', async (req: Request, res: Response) => {
 });
 
 router.patch('/:id/dismiss', async (req: Request, res: Response) => {
-  const { error } = await supabase
-    .from('jobs')
-    .update({ dismissed: true })
-    .eq('id', req.params.id);
+  const { error } = await db('UPDATE jobs SET dismissed = true WHERE id = $1', [req.params.id]);
 
   if (error) {
     res.status(500).json({ error: 'Erro ao descartar vaga' });

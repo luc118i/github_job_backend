@@ -15,8 +15,7 @@ dotenv.config({ override: true });
 // Falha imediatamente no boot se alguma estiver ausente — melhor que crash silencioso em runtime.
 const REQUIRED_ENV: string[] = [
   'JWT_SECRET',
-  'SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY',
+  'DATABASE_URL',
 ];
 
 const missing = REQUIRED_ENV.filter((key) => !process.env[key]);

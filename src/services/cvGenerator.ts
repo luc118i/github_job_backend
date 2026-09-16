@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import Groq from 'groq-sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CvRequest, CvResponse, CvBlock, CvBlockType, LinkedInPosition, LinkedInEducation } from '../types';
-import { supabase } from './supabase';
+import { db } from './db';
 
 const geminiClient = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
@@ -281,21 +281,21 @@ export async function generateCv(req: CvRequest): Promise<CvResponse> {
   // Markdown derivado dos blocos — fonte para PDF e retrocompatibilidade.
   const content = blocksToMarkdown(req, blocks);
 
-  const { data, error } = await supabase
-    .from('cvs')
-    .insert({ job_id: req.job.id, content, content_blocks: blocks })
-    .select('id')
-    .single();
+  const { data: rows, error } = await db(
+    'INSERT INTO cvs (job_id, content, content_blocks) VALUES ($1, $2, $3) RETURNING id',
+    [req.job.id, content, JSON.stringify(blocks)],
+  );
 
-  if (error) throw new Error(error.message);
+  if (error || !rows[0]) throw new Error(error?.message ?? 'Falha ao inserir CV');
 
-  const cvId = data.id as string;
+  const cvId = rows[0].id as string;
 
   // M2: registra a versão inicial automaticamente (histórico começa aqui).
   // Best-effort: se a tabela ainda não existir, não derruba a geração do CV.
-  const { error: vErr } = await supabase
-    .from('cv_versions')
-    .insert({ cv_id: cvId, content, content_blocks: blocks, label: 'Versão inicial', source: 'initial' });
+  const { error: vErr } = await db(
+    `INSERT INTO cv_versions (cv_id, content, content_blocks, label, source) VALUES ($1, $2, $3, $4, $5)`,
+    [cvId, content, JSON.stringify(blocks), 'Versão inicial', 'initial'],
+  );
   if (vErr) console.warn(`[cv] falha ao salvar versão inicial: ${vErr.message}`);
 
   return { cvId, content, blocks };

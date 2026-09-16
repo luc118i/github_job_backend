@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { analyzeJobLink, CandidateProfile } from '../services/linkAnalyzer';
 import { verifyLink } from '../services/linkVerifier';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 import { LinkedInData } from '../types';
 
@@ -40,34 +40,35 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
     const linkStatus = hasUrl ? await verifyLink(url!) : 'none';
 
-    const { data: search, error: searchError } = await supabase
-      .from('searches')
-      .insert({ github_username: githubUsername ?? null, skills: job.skills, user_id: req.userId ?? null })
-      .select()
-      .single();
+    const { data: searchRows, error: searchError } = await db(
+      `INSERT INTO searches (github_username, skills, user_id) VALUES ($1, $2, $3) RETURNING *`,
+      [githubUsername ?? null, JSON.stringify(job.skills), req.userId ?? null],
+    );
+    const search = searchRows[0];
+    if (searchError || !search) throw new Error(searchError?.message || 'Falha ao inserir busca');
 
-    if (searchError) throw new Error(searchError.message);
+    const { data: jobRows, error: jobError } = await db(
+      `INSERT INTO jobs (search_id, title, company, level, remote, location, skills, description, salary, link, link_status, seen)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        search.id,
+        job.title,
+        job.company,
+        job.level,
+        job.remote,
+        job.location ?? null,
+        JSON.stringify(job.skills),
+        job.description,
+        job.salary,
+        hasUrl ? url : null,
+        linkStatus === 'none' ? 'unverified' : linkStatus,
+        true,
+      ],
+    );
+    const savedJob = jobRows[0];
 
-    const { data: savedJob, error: jobError } = await supabase
-      .from('jobs')
-      .insert({
-        search_id: search.id,
-        title: job.title,
-        company: job.company,
-        level: job.level,
-        remote: job.remote,
-        location: job.location ?? null,
-        skills: job.skills,
-        description: job.description,
-        salary: job.salary,
-        link: hasUrl ? url : null,
-        link_status: linkStatus === 'none' ? 'unverified' : linkStatus,
-        seen: true,
-      })
-      .select()
-      .single();
-
-    if (jobError) throw new Error(jobError.message);
+    if (jobError || !savedJob) throw new Error(jobError?.message || 'Falha ao inserir vaga');
 
     res.json({
       job: savedJob,

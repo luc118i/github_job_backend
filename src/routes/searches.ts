@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, optionalAuth, AuthRequest } from '../middleware/auth';
 import { verifyLink, resolveJobLink } from '../services/linkVerifier';
 
@@ -13,14 +13,13 @@ router.get('/last-query', optionalAuth, async (req: AuthRequest, res: Response) 
     return;
   }
 
-  const { data, error } = await supabase
-    .from('searches')
-    .select('query, skills')
-    .eq('user_id', req.userId)
-    .not('query', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    `SELECT query, skills FROM searches
+      WHERE user_id = $1 AND query IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1`,
+    [req.userId],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: 'Erro ao carregar a última busca.' });
@@ -36,11 +35,10 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   const recent = req.query.scope === 'recent';
 
   // Step 1 — buscas do usuário (id + data, mais recentes primeiro)
-  const { data: userSearches, error: searchesError } = await supabase
-    .from('searches')
-    .select('id, created_at')
-    .eq('user_id', req.userId!)
-    .order('created_at', { ascending: false });
+  const { data: userSearches, error: searchesError } = await db(
+    'SELECT id, created_at FROM searches WHERE user_id = $1 ORDER BY created_at DESC',
+    [req.userId!],
+  );
 
   if (searchesError) {
     res.status(500).json({ error: 'Erro ao carregar histórico de buscas.' });
@@ -55,13 +53,16 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
   // Helper: busca jobs (não descartados) para um conjunto de search IDs.
   const queryJobs = async (ids: string[]) =>
-    supabase
-      .from('jobs')
-      .select('*, searches(github_username)')
-      .in('search_id', ids)
-      .or('dismissed.eq.false,dismissed.is.null')
-      .order('created_at', { ascending: false })
-      .limit(300);
+    db(
+      `SELECT jobs.*, searches.github_username AS search_github_username
+         FROM jobs
+         JOIN searches ON searches.id = jobs.search_id
+        WHERE jobs.search_id = ANY($1::uuid[])
+          AND (jobs.dismissed = false OR jobs.dismissed IS NULL)
+        ORDER BY jobs.created_at DESC
+        LIMIT 300`,
+      [ids],
+    );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let jobs: any[] | null = null;
@@ -88,9 +89,9 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 
   const seen = new Set<string>();
   const rawFeed = (jobs ?? [])
-    .map(({ searches: search, ...job }) => ({
+    .map(({ search_github_username, ...job }) => ({
       ...job,
-      github_username: (search as { github_username: string | null } | null)?.github_username ?? null,
+      github_username: (search_github_username as string | null) ?? null,
     }))
     .filter((job) => {
       const key = `${job.title.toLowerCase().trim()}::${job.company.toLowerCase().trim()}`;

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { PortfolioData, PortfolioProject, PortfolioRecruiter, PortfolioTemplate, LinkedInData, CareerProfile, UserPreferences } from '../types';
 import { askAboutCandidate, PortfolioChatTurn } from '../services/portfolioChat';
@@ -32,18 +32,19 @@ function buildRecruiter(prefs: UserPreferences | null, career: CareerProfile | n
 // Monta os dados públicos do portfólio (ou null se inexistente/não publicado).
 // Reusado pela página pública e pelo chat "Pergunte sobre mim".
 async function gatherPortfolio(username: string): Promise<PortfolioData | null> {
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('id, name, email, github_username, linkedin_data, preferences, career_profile, portfolio_published, portfolio_headline, portfolio_summary, portfolio_template')
-    .ilike('github_username', username)
-    .maybeSingle();
+  const { data: userRows, error } = await db(
+    `SELECT id, name, email, github_username, linkedin_data, preferences, career_profile, portfolio_published, portfolio_headline, portfolio_summary, portfolio_template
+       FROM users WHERE github_username ILIKE $1`,
+    [username],
+  );
+  const user = userRows[0];
   if (error || !user || !user.portfolio_published) return null;
 
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('title, description, tech, competencies, highlights, category, link, repo, portfolio_score')
-    .eq('user_id', user.id)
-    .order('portfolio_score', { ascending: false, nullsFirst: false });
+  const { data: projects } = await db(
+    `SELECT title, description, tech, competencies, highlights, category, link, repo, portfolio_score
+       FROM projects WHERE user_id = $1 ORDER BY portfolio_score DESC NULLS LAST`,
+    [user.id],
+  );
 
   const portfolioProjects: PortfolioProject[] = (projects ?? []).map((p) => ({
     title: (p.title as string) ?? '',
@@ -129,22 +130,20 @@ router.post('/public/:username/ask', async (req: Request, res: Response) => {
 
 // POST /portfolio/generate — IA gera headline + resumo a partir das fontes.
 router.post('/generate', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { data: user } = await supabase
-    .from('users')
-    .select('name, github_username, linkedin_data, career_profile')
-    .eq('id', req.userId!)
-    .maybeSingle();
+  const { data: userRows } = await db(
+    'SELECT name, github_username, linkedin_data, career_profile FROM users WHERE id = $1',
+    [req.userId!],
+  );
+  const user = userRows[0];
   if (!user) {
     res.status(404).json({ error: 'Usuário não encontrado.' });
     return;
   }
 
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('title, tech, competencies')
-    .eq('user_id', req.userId!)
-    .order('portfolio_score', { ascending: false, nullsFirst: false })
-    .limit(8);
+  const { data: projects } = await db(
+    'SELECT title, tech, competencies FROM projects WHERE user_id = $1 ORDER BY portfolio_score DESC NULLS LAST LIMIT 8',
+    [req.userId!],
+  );
 
   const li = (user.linkedin_data as LinkedInData | null) ?? null;
   const career = (user.career_profile as CareerProfile | null) ?? null;
@@ -177,18 +176,18 @@ router.post('/public/:username/view', async (req: Request, res: Response) => {
   const username = String(req.params.username ?? '').trim();
   if (!username) { res.status(400).json({ error: 'username é obrigatório.' }); return; }
   // Best-effort: incremento atômico via função; não falha a página se der erro.
-  try { await supabase.rpc('increment_portfolio_views', { p_username: username }); } catch { /* ignora */ }
+  try { await db('SELECT increment_portfolio_views($1)', [username]); } catch { /* ignora */ }
   res.json({ ok: true });
 });
 
 // ── Configurações (área autenticada) ──────────────────────────────
 // GET /portfolio/settings — estado atual de publicação + textos curados.
 router.get('/settings', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('portfolio_published, portfolio_headline, portfolio_summary, portfolio_template, portfolio_views')
-    .eq('id', req.userId!)
-    .maybeSingle();
+  const { data: userRows, error } = await db(
+    'SELECT portfolio_published, portfolio_headline, portfolio_summary, portfolio_template, portfolio_views FROM users WHERE id = $1',
+    [req.userId!],
+  );
+  const user = userRows[0];
 
   if (error || !user) {
     res.status(500).json({ error: error?.message ?? 'Usuário não encontrado.' });
@@ -209,23 +208,25 @@ router.patch('/settings', requireAuth, async (req: AuthRequest, res: Response) =
     published?: boolean; headline?: string | null; summary?: string | null; template?: string;
   };
 
-  const patch: Record<string, unknown> = {};
-  if (typeof published === 'boolean') patch.portfolio_published = published;
-  if (headline !== undefined) patch.portfolio_headline = headline ? String(headline).trim() : null;
-  if (summary !== undefined) patch.portfolio_summary = summary ? String(summary).trim() : null;
-  if (template !== undefined) patch.portfolio_template = normalizeTemplate(template);
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (typeof published === 'boolean') { params.push(published); sets.push(`portfolio_published = $${params.length}`); }
+  if (headline !== undefined) { params.push(headline ? String(headline).trim() : null); sets.push(`portfolio_headline = $${params.length}`); }
+  if (summary !== undefined) { params.push(summary ? String(summary).trim() : null); sets.push(`portfolio_summary = $${params.length}`); }
+  if (template !== undefined) { params.push(normalizeTemplate(template)); sets.push(`portfolio_template = $${params.length}`); }
 
-  if (Object.keys(patch).length === 0) {
+  if (sets.length === 0) {
     res.status(400).json({ error: 'Nenhum campo para atualizar.' });
     return;
   }
 
-  const { data, error } = await supabase
-    .from('users')
-    .update(patch)
-    .eq('id', req.userId!)
-    .select('portfolio_published, portfolio_headline, portfolio_summary, portfolio_template')
-    .single();
+  params.push(req.userId!);
+  const { data: rows, error } = await db(
+    `UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length}
+     RETURNING portfolio_published, portfolio_headline, portfolio_summary, portfolio_template`,
+    params,
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });

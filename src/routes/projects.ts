@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db, insertRows } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ProjectInput, ProjectCategory, ProjectMatchJob } from '../types';
 import { matchProjects, MatchProject } from '../services/projectMatcher';
@@ -38,12 +38,13 @@ function sanitize(body: ProjectInput) {
 }
 
 // GET /projects — lista os projetos do usuário (mais recentes primeiro).
+const PROJECT_SELECT = 'id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at';
+
 router.get('/', async (req: AuthRequest, res: Response) => {
-  const { data, error } = await supabase
-    .from('projects')
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
-    .eq('user_id', req.userId!)
-    .order('created_at', { ascending: false });
+  const { data, error } = await db(
+    `SELECT ${PROJECT_SELECT} FROM projects WHERE user_id = $1 ORDER BY created_at DESC`,
+    [req.userId!],
+  );
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -60,11 +61,13 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('projects')
-    .insert({ ...payload, user_id: req.userId! })
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
-    .single();
+  const { data: rows, error } = await db(
+    `INSERT INTO projects (title, description, tech, highlights, category, link, repo, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING ${PROJECT_SELECT}`,
+    [payload.title, payload.description, JSON.stringify(payload.tech), JSON.stringify(payload.highlights), payload.category, payload.link, payload.repo, req.userId!],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -81,13 +84,14 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('projects')
-    .update({ ...payload, updated_at: new Date().toISOString() })
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!)
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at')
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    `UPDATE projects
+        SET title = $1, description = $2, tech = $3, highlights = $4, category = $5, link = $6, repo = $7, updated_at = now()
+      WHERE id = $8 AND user_id = $9
+      RETURNING ${PROJECT_SELECT}`,
+    [payload.title, payload.description, JSON.stringify(payload.tech), JSON.stringify(payload.highlights), payload.category, payload.link, payload.repo, req.params.id, req.userId!],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -110,11 +114,10 @@ router.post('/import', async (req: AuthRequest, res: Response) => {
   }
 
   // Repos já presentes na biblioteca do usuário (evita duplicar).
-  const { data: existing, error: exErr } = await supabase
-    .from('projects')
-    .select('repo')
-    .eq('user_id', req.userId!)
-    .not('repo', 'is', null);
+  const { data: existing, error: exErr } = await db<{ repo: string }>(
+    'SELECT repo FROM projects WHERE user_id = $1 AND repo IS NOT NULL',
+    [req.userId!],
+  );
 
   if (exErr) {
     res.status(500).json({ error: exErr.message });
@@ -132,10 +135,7 @@ router.post('/import', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('projects')
-    .insert(rows)
-    .select('id, user_id, title, description, tech, highlights, category, link, repo, competencies, portfolio_score, created_at, updated_at');
+  const { data, error } = await insertRows('projects', rows);
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -155,10 +155,10 @@ router.post('/match-ai', async (req: AuthRequest, res: Response) => {
   }
 
   // Projetos do usuário (inclui readme cacheado + link p/ buscar o que falta).
-  const { data: projects, error } = await supabase
-    .from('projects')
-    .select('id, title, description, tech, link, repo, readme')
-    .eq('user_id', req.userId!);
+  const { data: projects, error } = await db(
+    'SELECT id, title, description, tech, link, repo, readme FROM projects WHERE user_id = $1',
+    [req.userId!],
+  );
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -178,7 +178,7 @@ router.post('/match-ai', async (req: AuthRequest, res: Response) => {
       const readme = await fetchRepoReadme(gh.owner, gh.repo);
       p.readme = readme ?? '';
       // Persiste o cache (não bloqueia a resposta se falhar).
-      await supabase.from('projects').update({ readme: p.readme }).eq('id', p.id).eq('user_id', req.userId!);
+      await db('UPDATE projects SET readme = $1 WHERE id = $2 AND user_id = $3', [p.readme, p.id, req.userId!]);
     }),
   );
 
@@ -218,24 +218,22 @@ async function enrichRow(userId: string, row: Record<string, unknown>) {
     tech: Array.isArray(row.tech) ? (row.tech as string[]) : [],
     readme: readme ?? '',
   });
-  const { data } = await supabase
-    .from('projects')
-    .update({ competencies, portfolio_score: score, readme: readme ?? '', updated_at: new Date().toISOString() })
-    .eq('id', row.id as string)
-    .eq('user_id', userId)
-    .select(ENRICH_SELECT)
-    .single();
-  return data;
+  const { data: rows } = await db(
+    `UPDATE projects SET competencies = $1, portfolio_score = $2, readme = $3, updated_at = now()
+      WHERE id = $4 AND user_id = $5
+      RETURNING ${ENRICH_SELECT}`,
+    [JSON.stringify(competencies), score, readme ?? '', row.id as string, userId],
+  );
+  return rows[0];
 }
 
 // POST /projects/:id/enrich — analisa 1 projeto com IA (competências + score).
 router.post('/:id/enrich', async (req: AuthRequest, res: Response) => {
-  const { data: row, error } = await supabase
-    .from('projects')
-    .select('id, title, description, tech, link, repo, readme')
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!)
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    'SELECT id, title, description, tech, link, repo, readme FROM projects WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.userId!],
+  );
+  const row = rows[0];
   if (error || !row) {
     res.status(404).json({ error: 'Projeto não encontrado.' });
     return;
@@ -250,11 +248,10 @@ router.post('/:id/enrich', async (req: AuthRequest, res: Response) => {
 
 // POST /projects/enrich-all — analisa todos os projetos ainda sem score.
 router.post('/enrich-all', async (req: AuthRequest, res: Response) => {
-  const { data: rows, error } = await supabase
-    .from('projects')
-    .select('id, title, description, tech, link, repo, readme, portfolio_score')
-    .eq('user_id', req.userId!)
-    .is('portfolio_score', null);
+  const { data: rows, error } = await db(
+    'SELECT id, title, description, tech, link, repo, readme, portfolio_score FROM projects WHERE user_id = $1 AND portfolio_score IS NULL',
+    [req.userId!],
+  );
   if (error) {
     res.status(500).json({ error: error.message });
     return;
@@ -270,11 +267,7 @@ router.post('/enrich-all', async (req: AuthRequest, res: Response) => {
 
 // DELETE /projects/:id — remove um projeto (só do próprio usuário).
 router.delete('/:id', async (req: AuthRequest, res: Response) => {
-  const { error } = await supabase
-    .from('projects')
-    .delete()
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!);
+  const { error } = await db('DELETE FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.userId!]);
 
   if (error) {
     res.status(500).json({ error: error.message });

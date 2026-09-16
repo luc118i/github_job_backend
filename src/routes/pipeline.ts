@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { PipelineStatus, PipelineEntryInput, PipelineInsightsRequest } from '../types';
 import { generatePipelineInsights } from '../services/pipelineInsights';
@@ -22,10 +22,7 @@ function normalizeStatus(v: unknown): PipelineStatus | null {
 
 // GET /pipeline — todas as entradas do usuário.
 router.get('/', async (req: AuthRequest, res: Response) => {
-  const { data, error } = await supabase
-    .from('job_pipeline')
-    .select(SELECT)
-    .eq('user_id', req.userId!);
+  const { data, error } = await db(`SELECT ${SELECT} FROM job_pipeline WHERE user_id = $1`, [req.userId!]);
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -45,12 +42,11 @@ router.put('/:jobId', async (req: AuthRequest, res: Response) => {
   const body = req.body as PipelineEntryInput;
 
   // Estado atual (p/ detectar mudança de etapa e preservar campos).
-  const { data: existing } = await supabase
-    .from('job_pipeline')
-    .select('status')
-    .eq('user_id', req.userId!)
-    .eq('job_id', jobId)
-    .maybeSingle();
+  const { data: existingRows } = await db<{ status: string }>(
+    'SELECT status FROM job_pipeline WHERE user_id = $1 AND job_id = $2',
+    [req.userId!, jobId],
+  );
+  const existing = existingRows[0];
 
   const row: Record<string, unknown> = {
     user_id: req.userId!,
@@ -74,11 +70,21 @@ router.put('/:jobId', async (req: AuthRequest, res: Response) => {
   if (body.next_step_date !== undefined) row.next_step_date = body.next_step_date || null;
   if (body.cv_id !== undefined) row.cv_id = body.cv_id || null;
 
-  const { data, error } = await supabase
-    .from('job_pipeline')
-    .upsert(row, { onConflict: 'user_id,job_id' })
-    .select(SELECT)
-    .single();
+  const columns = Object.keys(row);
+  const params = columns.map((c) => row[c]);
+  const placeholders = columns.map((_, i) => `$${i + 1}`);
+  const updateSet = columns
+    .filter((c) => c !== 'user_id' && c !== 'job_id')
+    .map((c) => `${c} = EXCLUDED.${c}`)
+    .join(', ');
+
+  const { data: rows, error } = await db(
+    `INSERT INTO job_pipeline (${columns.join(', ')}) VALUES (${placeholders.join(', ')})
+     ON CONFLICT (user_id, job_id) DO UPDATE SET ${updateSet}
+     RETURNING ${SELECT}`,
+    params,
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -106,11 +112,10 @@ router.post('/insights', async (req: AuthRequest, res: Response) => {
 
 // DELETE /pipeline/:jobId — remove a entrada (vaga descartada do pipeline).
 router.delete('/:jobId', async (req: AuthRequest, res: Response) => {
-  const { error } = await supabase
-    .from('job_pipeline')
-    .delete()
-    .eq('user_id', req.userId!)
-    .eq('job_id', req.params.jobId);
+  const { error } = await db(
+    'DELETE FROM job_pipeline WHERE user_id = $1 AND job_id = $2',
+    [req.userId!, req.params.jobId],
+  );
 
   if (error) {
     res.status(500).json({ error: error.message });

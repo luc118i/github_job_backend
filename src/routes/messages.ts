@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { generateMessage } from '../services/messageGenerator';
 import { MessageType, MessageGenRequest, MessageInput } from '../types';
@@ -32,16 +32,16 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
 
 // GET /messages?jobId= — lista as mensagens do usuário (filtra por vaga se enviado).
 router.get('/', async (req: AuthRequest, res: Response) => {
-  let query = supabase
-    .from('messages')
-    .select('id, user_id, job_id, type, subject, content, created_at, updated_at')
-    .eq('user_id', req.userId!)
-    .order('created_at', { ascending: false });
-
   const jobId = req.query.jobId;
-  if (typeof jobId === 'string' && jobId) query = query.eq('job_id', jobId);
+  const params: unknown[] = [req.userId!];
+  let sql = 'SELECT id, user_id, job_id, type, subject, content, created_at, updated_at FROM messages WHERE user_id = $1';
+  if (typeof jobId === 'string' && jobId) {
+    params.push(jobId);
+    sql += ` AND job_id = $${params.length}`;
+  }
+  sql += ' ORDER BY created_at DESC';
 
-  const { data, error } = await query;
+  const { data, error } = await db(sql, params);
   if (error) {
     res.status(500).json({ error: error.message });
     return;
@@ -57,17 +57,13 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      user_id: req.userId!,
-      job_id,
-      type,
-      subject: subject?.trim() || null,
-      content: content.trim(),
-    })
-    .select('id, user_id, job_id, type, subject, content, created_at, updated_at')
-    .single();
+  const { data: rows, error } = await db(
+    `INSERT INTO messages (user_id, job_id, type, subject, content)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, user_id, job_id, type, subject, content, created_at, updated_at`,
+    [req.userId!, job_id, type, subject?.trim() || null, content.trim()],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -84,13 +80,13 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('messages')
-    .update({ subject: subject?.trim() || null, content: content.trim(), updated_at: new Date().toISOString() })
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!)
-    .select('id, user_id, job_id, type, subject, content, created_at, updated_at')
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    `UPDATE messages SET subject = $1, content = $2, updated_at = now()
+      WHERE id = $3 AND user_id = $4
+      RETURNING id, user_id, job_id, type, subject, content, created_at, updated_at`,
+    [subject?.trim() || null, content.trim(), req.params.id, req.userId!],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -105,11 +101,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
 
 // DELETE /messages/:id — remove (só do próprio usuário).
 router.delete('/:id', async (req: AuthRequest, res: Response) => {
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!);
+  const { error } = await db('DELETE FROM messages WHERE id = $1 AND user_id = $2', [req.params.id, req.userId!]);
 
   if (error) {
     res.status(500).json({ error: error.message });

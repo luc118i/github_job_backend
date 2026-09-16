@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { generateCv, adaptCv } from '../services/cvGenerator';
 import { CvRequest, CvBlock, CvVersionSource } from '../types';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 
 const router = Router();
 
@@ -56,12 +56,11 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 router.get('/job/:jobId', async (req: Request, res: Response) => {
-  const { data, error } = await supabase
-    .from('cvs')
-    .select('id, content, content_blocks')
-    .eq('job_id', req.params.jobId)
-    .limit(1)
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    'SELECT id, content, content_blocks FROM cvs WHERE job_id = $1 LIMIT 1',
+    [req.params.jobId],
+  );
+  const data = rows[0];
 
   if (error || !data) {
     res.status(404).json({ error: 'CV não encontrado' });
@@ -77,13 +76,9 @@ router.patch('/:id', async (req: Request, res: Response) => {
     return;
   }
   // Salva o Markdown derivado e, quando o front mandar, os blocos editados.
-  const patch: { content: string; content_blocks?: CvBlock[] } = { content };
-  if (Array.isArray(blocks)) patch.content_blocks = blocks;
-
-  const { error } = await supabase
-    .from('cvs')
-    .update(patch)
-    .eq('id', req.params.id);
+  const { error } = Array.isArray(blocks)
+    ? await db('UPDATE cvs SET content = $1, content_blocks = $2 WHERE id = $3', [content, JSON.stringify(blocks), req.params.id])
+    : await db('UPDATE cvs SET content = $1 WHERE id = $2', [content, req.params.id]);
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -108,17 +103,13 @@ router.post('/:id/versions', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('cv_versions')
-    .insert({
-      cv_id: req.params.id,
-      content,
-      content_blocks: Array.isArray(blocks) ? blocks : null,
-      label: label?.trim() || 'Versão',
-      source: source ?? 'manual',
-    })
-    .select('id, label, source, created_at')
-    .single();
+  const { data: rows, error } = await db(
+    `INSERT INTO cv_versions (cv_id, content, content_blocks, label, source)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, label, source, created_at`,
+    [req.params.id, content, Array.isArray(blocks) ? JSON.stringify(blocks) : null, label?.trim() || 'Versão', source ?? 'manual'],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -151,11 +142,10 @@ router.post('/:id/adapt', async (req: Request, res: Response) => {
 
 // Histórico de versões (mais recentes primeiro).
 router.get('/:id/versions', async (req: Request, res: Response) => {
-  const { data, error } = await supabase
-    .from('cv_versions')
-    .select('id, cv_id, content, content_blocks, label, source, created_at')
-    .eq('cv_id', req.params.id)
-    .order('created_at', { ascending: false });
+  const { data, error } = await db(
+    'SELECT id, cv_id, content, content_blocks, label, source, created_at FROM cv_versions WHERE cv_id = $1 ORDER BY created_at DESC',
+    [req.params.id],
+  );
 
   if (error) {
     res.status(500).json({ error: error.message });

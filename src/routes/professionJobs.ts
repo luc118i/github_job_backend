@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { findProfessionJobs, findJobsByQuery } from '../services/genericJobFinder';
 import { verifyLink, resolveJobLink, sortByLinkQuality } from '../services/linkVerifier';
-import { supabase } from '../services/supabase';
+import { db, insertRows } from '../services/db';
 import { CareerProfile, LinkedInData, UserPreferences } from '../types';
 import { optionalAuth, AuthRequest } from '../middleware/auth';
 
@@ -104,23 +104,23 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
       const skills = [...new Set(verifiedJobs.flatMap((j) => j.skills))].slice(0, 10);
 
-      const { data: search, error: searchError } = await supabase
-        .from('searches')
-        .insert({ github_username: null, skills, user_id: req.userId ?? null, query })
-        .select()
-        .single();
+      const { data: searchRows, error: searchError } = await db(
+        `INSERT INTO searches (github_username, skills, user_id, query) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [null, JSON.stringify(skills), req.userId ?? null, query],
+      );
+      const search = searchRows[0];
+      if (searchError || !search) throw new Error(searchError?.message || 'Falha ao inserir busca');
 
-      if (searchError) throw new Error(searchError.message);
-
-      const { data: savedJobs, error: jobsError } = await supabase
-        .from('jobs')
-        .insert(verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)))
-        .select();
+      const { data: savedJobs, error: jobsError } = await insertRows(
+        'jobs',
+        verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)),
+      );
 
       if (jobsError) throw new Error(jobsError.message);
 
-      const jobs = (savedJobs ?? []).map((saved, i) => ({
-        ...saved,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const jobs: any[] = (savedJobs ?? []).map((saved, i) => ({
+        ...(saved as object),
         match: verifiedJobs[i].match,
         ...((verifiedJobs[i] as Record<string, unknown>)['published_at'] != null
           ? { published_at: (verifiedJobs[i] as Record<string, unknown>)['published_at'] }
@@ -209,24 +209,24 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
 
     const skills = [...new Set(verifiedJobs.flatMap((j) => j.skills))].slice(0, 10);
 
-    const { data: search, error: searchError } = await supabase
-      .from('searches')
-      .insert({ github_username: null, skills, user_id: req.userId ?? null })
-      .select()
-      .single();
+    const { data: searchRows, error: searchError } = await db(
+      `INSERT INTO searches (github_username, skills, user_id) VALUES ($1, $2, $3) RETURNING *`,
+      [null, JSON.stringify(skills), req.userId ?? null],
+    );
+    const search = searchRows[0];
+    if (searchError || !search) throw new Error(searchError?.message || 'Falha ao inserir busca');
 
-    if (searchError) throw new Error(searchError.message);
-
-    const { data: savedJobs, error: jobsError } = await supabase
-      .from('jobs')
-      .insert(verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)))
-      .select();
+    const { data: savedJobs, error: jobsError } = await insertRows(
+      'jobs',
+      verifiedJobs.map((vj) => toInsertRow(vj as Record<string, unknown>, search.id)),
+    );
 
     if (jobsError) throw new Error(jobsError.message);
 
     // Re-attach match scores and published_at for the live response (not stored in DB)
-    const jobs = (savedJobs ?? []).map((saved, i) => ({
-      ...saved,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const jobs: any[] = (savedJobs ?? []).map((saved, i) => ({
+      ...(saved as object),
       match: verifiedJobs[i].match,
       ...((verifiedJobs[i] as Record<string, unknown>)['published_at'] != null
         ? { published_at: (verifiedJobs[i] as Record<string, unknown>)['published_at'] }

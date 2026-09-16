@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { db } from '../services/db';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { generatePrep, simulateReply } from '../services/interviewCoach';
 import {
@@ -74,12 +74,11 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'jobId é obrigatório.' });
     return;
   }
-  const { data, error } = await supabase
-    .from('interview_preps')
-    .select(SELECT)
-    .eq('user_id', req.userId!)
-    .eq('job_id', jobId)
-    .maybeSingle();
+  const { data: rows, error } = await db(
+    `SELECT ${SELECT} FROM interview_preps WHERE user_id = $1 AND job_id = $2`,
+    [req.userId!, jobId],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -96,20 +95,17 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const { data, error } = await supabase
-    .from('interview_preps')
-    .upsert(
-      {
-        user_id: req.userId!,
-        job_id,
-        questions,
-        recruiter_questions: Array.isArray(recruiterQuestions) ? recruiterQuestions : [],
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,job_id' },
-    )
-    .select(SELECT)
-    .single();
+  const { data: rows, error } = await db(
+    `INSERT INTO interview_preps (user_id, job_id, questions, recruiter_questions, updated_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (user_id, job_id) DO UPDATE SET
+       questions = EXCLUDED.questions,
+       recruiter_questions = EXCLUDED.recruiter_questions,
+       updated_at = EXCLUDED.updated_at
+     RETURNING ${SELECT}`,
+    [req.userId!, job_id, JSON.stringify(questions), JSON.stringify(Array.isArray(recruiterQuestions) ? recruiterQuestions : [])],
+  );
+  const data = rows[0];
 
   if (error) {
     res.status(500).json({ error: error.message });
@@ -120,11 +116,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
 // DELETE /interview/:id — remove a preparação (só do próprio usuário).
 router.delete('/:id', async (req: AuthRequest, res: Response) => {
-  const { error } = await supabase
-    .from('interview_preps')
-    .delete()
-    .eq('id', req.params.id)
-    .eq('user_id', req.userId!);
+  const { error } = await db('DELETE FROM interview_preps WHERE id = $1 AND user_id = $2', [req.params.id, req.userId!]);
 
   if (error) {
     res.status(500).json({ error: error.message });
