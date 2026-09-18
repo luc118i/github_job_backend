@@ -81,10 +81,17 @@ router.post('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   } catch (err) {
     console.error('[analyze-link] erro:', err);
     const msg = err instanceof Error ? err.message : '';
-    if (msg.includes('quota') || msg.includes('429')) {
-      res.status(503).json({ error: 'Limite de IA atingido. Tente novamente em alguns minutos.' });
+    const isServiceOutage = /quota|429|credit balance|insufficient_quota|503 Service Unavailable/i.test(msg);
+    // Erros crus de SDK (Anthropic/Groq/Gemini) vêm como JSON/stack técnico — nunca
+    // repassar isso pro usuário final. Só mensagens curtas em PT-BR (as que a própria
+    // linkAnalyzer lança de propósito) são seguras de exibir.
+    const isUserFacingMessage = !!msg && msg.length < 300 && !/[{}]/.test(msg) && !/^\d{3}\s/.test(msg);
+    if (isServiceOutage) {
+      res.status(503).json({ error: 'Serviço de IA temporariamente indisponível (limite atingido). Tente novamente em alguns minutos.' });
+    } else if (isUserFacingMessage) {
+      res.status(500).json({ error: msg });
     } else {
-      res.status(500).json({ error: msg || 'Erro ao analisar vaga. Tente novamente.' });
+      res.status(500).json({ error: 'Erro ao analisar vaga. Tente novamente.' });
     }
   }
 });
