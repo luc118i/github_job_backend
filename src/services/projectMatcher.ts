@@ -42,8 +42,11 @@ Leia o README de cada projeto para entender o que ele realmente faz.
 Regras:
 1. Dê um score de 0 a 100 por projeto (0 = nada a ver, 100 = altamente relevante).
 2. "reason": UMA frase curta em português explicando o score, citando o vínculo concreto com a vaga.
-3. NÃO invente fatos que não estejam no projeto.
-4. Sem emojis. Retorne APENAS um objeto JSON válido.`;
+3. "summary": resumo factual de até 2 linhas (o que o projeto FAZ e principais tecnologias),
+   baseado no README — não é sobre a vaga, é uma descrição do projeto em si, pronta pra usar
+   num currículo. Se não houver README suficiente, resuma a partir do título/stack/descrição.
+4. NÃO invente fatos que não estejam no projeto.
+5. Sem emojis. Retorne APENAS um objeto JSON válido.`;
 
 const README_MAX = 1500; // por projeto, dentro do prompt — controla o total de tokens.
 
@@ -52,7 +55,7 @@ function buildPrompt(job: ProjectMatchJob, projects: MatchProject[]): string {
 
   const lines = [
     'Retorne APENAS um JSON no formato:',
-    '{"matches": [{"id": "<id>", "score": <0-100>, "reason": "<1 frase>"}]}',
+    '{"matches": [{"id": "<id>", "score": <0-100>, "reason": "<1 frase>", "summary": "<até 2 linhas>"}]}',
     'Inclua TODOS os projetos listados, usando exatamente o "id" informado.',
     '',
     `VAGA: ${job.title}`,
@@ -97,7 +100,8 @@ function parseMatches(raw: string, valid: Set<string>): ProjectAiMatch[] {
     const scoreNum = Number(m.score);
     const score = Number.isFinite(scoreNum) ? Math.max(0, Math.min(100, Math.round(scoreNum))) : 0;
     const reason = typeof m.reason === 'string' ? m.reason.trim() : '';
-    out.push({ id, score, reason });
+    const summary = typeof m.summary === 'string' ? m.summary.trim() : '';
+    out.push({ id, score, reason, summary });
   }
   if (out.length === 0) throw new Error('Nenhum match válido retornado');
   return out;
