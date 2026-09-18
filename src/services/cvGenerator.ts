@@ -1,10 +1,7 @@
 import { randomUUID } from 'crypto';
 import Groq from 'groq-sdk';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CvRequest, CvResponse, CvBlock, CvBlockType, LinkedInPosition, LinkedInEducation } from '../types';
 import { db } from './db';
-
-const geminiClient = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
 // Lazy init — evita instanciar antes do .env ser carregado (mesmo padrão de groq.ts)
 let _groq: Groq | null = null;
@@ -192,9 +189,9 @@ function blocksToMarkdown(req: CvRequest, blocks: CvBlock[]): string {
   return `${header}\n\n${body}`.trim();
 }
 
-// Loop de modelos Groq → blocos. Genérico: serve tanto para gerar (buildPrompt)
-// quanto para adaptar (buildAdaptPrompt) o currículo.
-async function groqBlocks(userPrompt: string): Promise<CvBlock[]> {
+// Loop de modelos Groq → blocos. Único motor de geração/adaptação de CV — sem
+// fallback pra outro provedor, os 3 modelos abaixo já cobrem indisponibilidade.
+async function runBlocks(userPrompt: string): Promise<CvBlock[]> {
   const messages: Groq.Chat.ChatCompletionMessageParam[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: userPrompt },
@@ -232,47 +229,6 @@ async function groqBlocks(userPrompt: string): Promise<CvBlock[]> {
     }
   }
   throw lastErr;
-}
-
-const GEMINI_CV_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
-
-// Fallback: mesmo contrato de groqBlocks, via Gemini.
-async function geminiBlocks(userPrompt: string): Promise<CvBlock[]> {
-  let lastErr: unknown;
-  for (const modelName of GEMINI_CV_MODELS) {
-    try {
-      const model = geminiClient.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_PROMPT,
-        generationConfig: { responseMimeType: 'application/json' },
-      });
-      const result = await model.generateContent(userPrompt);
-      return parseBlocks(result.response.text());
-    } catch (err) {
-      const status = (err as { status?: number }).status;
-      const msg = (err as Error).message ?? '';
-      const retryable =
-        status === 503 || status === 429 ||
-        msg.includes('JSON') || msg.includes('blocos') || msg.includes('bloco');
-      if (retryable) {
-        console.warn(`[cv] Gemini ${modelName} falhou (${status ?? msg}), tentando próximo modelo...`);
-        lastErr = err;
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastErr;
-}
-
-// Motor primário Groq → fallback Gemini, ambos devolvendo blocos.
-async function runBlocks(userPrompt: string): Promise<CvBlock[]> {
-  try {
-    return await groqBlocks(userPrompt);
-  } catch (err) {
-    console.warn(`[cv] Groq indisponível (${(err as Error).message}), caindo pro Gemini...`);
-    return geminiBlocks(userPrompt);
-  }
 }
 
 export async function generateCv(req: CvRequest): Promise<CvResponse> {
