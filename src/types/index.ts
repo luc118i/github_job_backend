@@ -268,6 +268,8 @@ export interface ProjectAiMatch {
   score: number;
   /** 1 frase explicando o porquê do score (pt-BR). */
   reason: string;
+  /** Resumo factual de ~2 linhas do que o projeto faz, extraído do README (pt-BR). */
+  summary: string;
 }
 
 // ── Cartas/Mensagens (Career Studio M6) ───────────────────────────
